@@ -8,6 +8,10 @@
   background: #f4f7f6;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -20,4 +24,8 @@ body {
 button,
 input {
   font: inherit;
+}
+
+section[id] {
+  scroll-margin-top: 5rem;
 }
