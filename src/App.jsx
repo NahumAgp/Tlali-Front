@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import heroGreenhouse from './assets/hero-greenhouse.png'
+import heroTlaliTlapixqui from './assets/hero-tlali-tlapixqui.png'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080'
 const TOKEN_KEY = 'tlali_token'
 const DEFAULT_LOGIN_MESSAGE = ''
 
 const initialForm = {
-  deviceId: 'esp32-greenhouse-01',
-  greenhouseId: 'greenhouse-main',
+  deviceId: 'esp32-tlali-sensor-01',
+  siteId: 'tlali-tlapixqui-main',
   temperatureCelsius: '24.8',
   humidityPercent: '67.5',
   soilMoisturePercent: '41.2',
@@ -207,9 +207,9 @@ function TopNav({ auth, navigate, route }) {
             T
           </span>
           <span>
-            <span className="block text-base font-semibold leading-none">Tlali</span>
+            <span className="block text-base font-semibold leading-none">Tlali Tlapixqui</span>
             <span className="block text-xs font-medium text-emerald-100/80">
-              Smart greenhouse
+              Tlali Tlapixqui
             </span>
           </span>
         </button>
@@ -279,9 +279,9 @@ function LandingPage({ navigate }) {
     <>
       <section className="relative min-h-[92vh] overflow-hidden pt-16 text-white">
         <img
-          alt="Invernadero inteligente Tlali con sensores IoT"
+          alt="Tlali Tlapixqui con sensores IoT"
           className="absolute inset-0 h-full w-full object-cover"
-          src={heroGreenhouse}
+          src={heroTlaliTlapixqui}
         />
         <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/72 to-slate-950/10" />
 
@@ -291,7 +291,7 @@ function LandingPage({ navigate }) {
               Monitoreo agricola inteligente
             </p>
             <h1 className="mt-5 text-5xl font-semibold leading-tight tracking-normal sm:text-6xl">
-              Tlali
+              Tlali Tlapixqui
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-8 text-slate-100">
               Controla temperatura, humedad, luz y suelo desde una sola plataforma
@@ -321,10 +321,10 @@ function LandingPage({ navigate }) {
         <div className="mx-auto grid max-w-7xl gap-8 px-5 sm:px-8 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
-              Plataforma Tlali
+              Plataforma Tlali Tlapixqui
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-normal text-slate-950">
-              Observabilidad del invernadero sin friccion.
+              Observabilidad de Tlali Tlapixqui sin friccion.
             </h2>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -339,7 +339,7 @@ function LandingPage({ navigate }) {
         <div className="mx-auto grid max-w-7xl gap-4 px-5 sm:grid-cols-2 sm:px-8 lg:grid-cols-4">
           {[
             ['Temperatura', 'Rangos seguros para cultivo'],
-            ['Humedad aire', 'Microclima del invernadero'],
+            ['Humedad aire', 'Microclima de Tlali Tlapixqui'],
             ['Humedad suelo', 'Decision de riego'],
             ['Luz', 'Radiacion y exposicion'],
           ].map(([title, text]) => (
@@ -413,7 +413,7 @@ function LoginPage({ auth, loginMessage, navigate }) {
             Acceso seguro
           </p>
           <h1 className="mt-4 text-4xl font-semibold tracking-normal sm:text-5xl">
-            Entra al panel operativo de Tlali.
+            Entra al panel operativo de Tlali Tlapixqui.
           </h1>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-300">
             Usa el superadmin inicial para desarrollo o conecta Google OAuth con
@@ -499,7 +499,7 @@ function Dashboard({ auth, navigate }) {
 
   const latest = readings[0]
   const metrics = useMemo(() => buildSensorMetrics(latest), [latest])
-  const greenhouseState = useMemo(() => getGreenhouseState(metrics), [metrics])
+  const tlaliState = useMemo(() => getTlaliState(metrics), [metrics])
 
   async function loadReadings() {
     try {
@@ -566,7 +566,7 @@ function Dashboard({ auth, navigate }) {
               Dashboard privado
             </p>
             <h1 className="mt-1 text-3xl font-semibold tracking-normal text-slate-950">
-              Invernadero principal
+              Tlali Tlapixqui principal
             </h1>
             {auth.user && (
               <p className="mt-2 text-sm text-slate-500">
@@ -607,7 +607,7 @@ function Dashboard({ auth, navigate }) {
         <EnvironmentSummary
           latest={latest}
           readingsCount={readings.length}
-          state={greenhouseState}
+          state={tlaliState}
         />
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -643,7 +643,7 @@ function EnvironmentSummary({ latest, readingsCount, state }) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-              Estado del invernadero
+              Estado de Tlali Tlapixqui
             </p>
             <h2 className={`mt-2 text-3xl font-semibold tracking-normal ${state.textClass}`}>
               {state.label}
@@ -779,7 +779,7 @@ function DevicePanel({ latest }) {
       <h2 className="text-base font-semibold text-slate-900">Nodo sensor</h2>
       <dl className="mt-4 grid gap-3 text-sm">
         <DeviceStat label="Dispositivo" value={latest?.deviceId ?? '--'} />
-        <DeviceStat label="Invernadero" value={latest?.greenhouseId ?? '--'} />
+        <DeviceStat label="Sitio" value={latest?.siteId ?? '--'} />
         <DeviceStat label="Bateria" value={formatMetric(latest?.batteryVoltage, ' V')} />
         <DeviceStat
           label="Registrada"
@@ -871,7 +871,7 @@ function ReadingForm({ form, handleSubmit, message, updateField }) {
 
       <div className="mt-4 grid gap-3">
         <TextField label="Dispositivo" name="deviceId" onChange={updateField} required value={form.deviceId} />
-        <TextField label="Invernadero" name="greenhouseId" onChange={updateField} value={form.greenhouseId} />
+        <TextField label="Sitio" name="siteId" onChange={updateField} value={form.siteId} />
         <TextField label="Temperatura C" name="temperatureCelsius" onChange={updateField} required type="number" value={form.temperatureCelsius} />
         <TextField label="Humedad aire %" name="humidityPercent" onChange={updateField} required type="number" value={form.humidityPercent} />
         <TextField label="Humedad suelo %" name="soilMoisturePercent" onChange={updateField} type="number" value={form.soilMoisturePercent} />
@@ -937,7 +937,7 @@ async function authorizedFetch(url, token, options = {}, onUnauthorized) {
 function toReadingPayload(form) {
   return {
     deviceId: form.deviceId.trim(),
-    greenhouseId: form.greenhouseId.trim() || null,
+    siteId: form.siteId.trim() || null,
     temperatureCelsius: Number(form.temperatureCelsius),
     humidityPercent: Number(form.humidityPercent),
     soilMoisturePercent: optionalNumber(form.soilMoisturePercent),
@@ -1013,7 +1013,7 @@ function getSensorStatus(value, definition) {
   }
 }
 
-function getGreenhouseState(metrics) {
+function getTlaliState(metrics) {
   const activeMetrics = metrics.filter((metric) => metric.value !== null)
   const alerts = activeMetrics.filter((metric) => metric.status !== 'healthy')
 
@@ -1021,7 +1021,7 @@ function getGreenhouseState(metrics) {
     return {
       label: 'Sin lecturas',
       badge: 'Esperando sensores',
-      message: 'Cuando el ESP32 envie datos, aqui veras el estado general del invernadero.',
+      message: 'Cuando el ESP32 envie datos, aqui veras el estado general de Tlali Tlapixqui.',
       borderClass: 'border-slate-200',
       textClass: 'text-slate-700',
       badgeClass: 'bg-slate-100 text-slate-700',

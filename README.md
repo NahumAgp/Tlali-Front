@@ -1,6 +1,6 @@
-# Tlali-Front
+# Tlali Tlapixqui Front
 
-Frontend de Tlali para visualizar lecturas recientes del invernadero y probar el envio de datos al backend.
+Frontend de Tlali Tlapixqui para visualizar lecturas recientes de sensores y probar el envio de datos al backend.
 
 ## Stack
 
