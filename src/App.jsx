@@ -3,6 +3,7 @@ import heroGreenhouse from './assets/hero-greenhouse.png'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080'
 const TOKEN_KEY = 'tlali_token'
+const DEFAULT_LOGIN_MESSAGE = ''
 
 const initialForm = {
   deviceId: 'esp32-greenhouse-01',
@@ -18,6 +19,8 @@ function App() {
   const [route, setRoute] = useState(() => window.location.pathname)
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
   const [user, setUser] = useState(null)
+  const [authStatus, setAuthStatus] = useState(() => (token ? 'checking' : 'guest'))
+  const [loginMessage, setLoginMessage] = useState(DEFAULT_LOGIN_MESSAGE)
 
   useEffect(() => {
     function handlePopState() {
@@ -47,41 +50,85 @@ function App() {
   useEffect(() => {
     if (!token) {
       setUser(null)
+      setAuthStatus('guest')
       return
     }
 
-    loadCurrentUser(token).then(setUser).catch(() => logout())
+    if (isTokenExpired(token)) {
+      endSession('/login', 'Tu sesion expiro. Inicia sesion otra vez.')
+      return
+    }
+
+    setAuthStatus('checking')
+    loadCurrentUser(token)
+      .then((currentUser) => {
+        setUser(currentUser)
+        setAuthStatus('authenticated')
+      })
+      .catch(() => endSession('/login', 'Tu sesion no es valida. Inicia sesion otra vez.'))
+
+    const expirationDelay = getTokenExpirationDelay(token)
+    if (!expirationDelay) {
+      return
+    }
+
+    const expirationTimer = window.setTimeout(() => {
+      endSession('/login', 'Tu sesion expiro. Inicia sesion otra vez.')
+    }, expirationDelay)
+
+    return () => window.clearTimeout(expirationTimer)
   }, [token])
 
-  function navigate(path) {
-    window.history.pushState({}, '', path)
+  useEffect(() => {
+    if (route === '/dashboard' && !token) {
+      navigate('/login', { replace: true })
+    }
+  }, [route, token])
+
+  function navigate(path, options = {}) {
+    if (options.replace) {
+      window.history.replaceState({}, '', path)
+    } else {
+      window.history.pushState({}, '', path)
+    }
     setRoute(path)
   }
 
   function saveToken(nextToken) {
     localStorage.setItem(TOKEN_KEY, nextToken)
     setToken(nextToken)
+    setLoginMessage(DEFAULT_LOGIN_MESSAGE)
   }
 
-  function logout() {
+  function endSession(nextRoute = '/', message = DEFAULT_LOGIN_MESSAGE) {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
     setUser(null)
-    navigate('/')
+    setAuthStatus('guest')
+    setLoginMessage(message)
+    navigate(nextRoute)
+  }
+
+  function logout() {
+    endSession('/', DEFAULT_LOGIN_MESSAGE)
   }
 
   const auth = {
     token,
     user,
+    status: authStatus,
     saveToken,
     logout,
+    onUnauthorized: () => endSession('/login', 'Tu sesion expiro. Inicia sesion otra vez.'),
   }
 
   return (
     <main className="min-h-screen bg-[#f6f8f4] text-slate-950">
       <TopNav auth={auth} navigate={navigate} route={route} />
 
-      {route === '/login' && <LoginPage auth={auth} navigate={navigate} />}
+      {route === '/login' && (
+        <LoginPage auth={auth} loginMessage={loginMessage} navigate={navigate} />
+      )}
       {route === '/dashboard' && <Dashboard auth={auth} navigate={navigate} />}
       {route !== '/login' && route !== '/dashboard' && route !== '/auth/callback' && (
         <LandingPage navigate={navigate} />
@@ -134,6 +181,14 @@ function TopNav({ auth, navigate, route }) {
         <div className="flex items-center gap-2">
           {authenticated ? (
             <>
+              <div className="hidden text-right sm:block">
+                <p className="text-sm font-semibold leading-none text-white">
+                  {auth.user?.fullName ?? 'Sesion activa'}
+                </p>
+                <p className="mt-1 text-xs font-medium text-emerald-100/75">
+                  {auth.user?.role ?? 'Validando'}
+                </p>
+              </div>
               <button
                 className="hidden rounded-md border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10 sm:inline-flex"
                 onClick={() => navigate('/dashboard')}
@@ -253,11 +308,21 @@ function FeatureCard({ title, text }) {
   )
 }
 
-function LoginPage({ auth, navigate }) {
+function LoginPage({ auth, loginMessage, navigate }) {
   const [email, setEmail] = useState('superadmin@tlali.local')
   const [password, setPassword] = useState('SuperAdmin123!')
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(loginMessage)
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (auth.token && auth.status === 'authenticated') {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [auth.status, auth.token])
+
+  useEffect(() => {
+    setMessage(loginMessage)
+  }, [loginMessage])
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -394,6 +459,8 @@ function Dashboard({ auth, navigate }) {
       const response = await authorizedFetch(
         `${API_URL}/api/v1/sensor-readings/latest?limit=8`,
         auth.token,
+        {},
+        auth.onUnauthorized,
       )
 
       if (!response.ok) {
@@ -414,11 +481,16 @@ function Dashboard({ auth, navigate }) {
 
     try {
       setMessage('Guardando lectura...')
-      const response = await authorizedFetch(`${API_URL}/api/v1/sensor-readings`, auth.token, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(toReadingPayload(form)),
-      })
+      const response = await authorizedFetch(
+        `${API_URL}/api/v1/sensor-readings`,
+        auth.token,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(toReadingPayload(form)),
+        },
+        auth.onUnauthorized,
+      )
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
@@ -455,23 +527,32 @@ function Dashboard({ auth, navigate }) {
             )}
           </div>
 
-          <div className="flex items-center gap-3 text-sm">
-            <span
-              className={`h-2.5 w-2.5 rounded-full ${
-                status === 'online'
-                  ? 'bg-emerald-500'
+          <div className="flex flex-col gap-3 sm:items-end">
+            <div className="flex items-center gap-3 text-sm">
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${
+                  status === 'online'
+                    ? 'bg-emerald-500'
+                    : status === 'checking'
+                      ? 'bg-amber-500'
+                      : 'bg-rose-500'
+                }`}
+              />
+              <span className="font-medium text-slate-700">
+                {status === 'online'
+                  ? 'API conectada'
                   : status === 'checking'
-                    ? 'bg-amber-500'
-                    : 'bg-rose-500'
-              }`}
-            />
-            <span className="font-medium text-slate-700">
-              {status === 'online'
-                ? 'API conectada'
-                : status === 'checking'
-                  ? 'Sincronizando'
-                  : 'API desconectada'}
-            </span>
+                    ? 'Sincronizando'
+                    : 'API desconectada'}
+              </span>
+            </div>
+            <button
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              onClick={auth.logout}
+              type="button"
+            >
+              Cerrar sesion
+            </button>
           </div>
         </header>
 
@@ -622,14 +703,20 @@ async function loadCurrentUser(token) {
   return response.json()
 }
 
-function authorizedFetch(url, token, options = {}) {
-  return fetch(url, {
+async function authorizedFetch(url, token, options = {}, onUnauthorized) {
+  const response = await fetch(url, {
     ...options,
     headers: {
       ...(options.headers ?? {}),
       Authorization: `Bearer ${token}`,
     },
   })
+
+  if (response.status === 401 && onUnauthorized) {
+    onUnauthorized()
+  }
+
+  return response
 }
 
 function toReadingPayload(form) {
@@ -657,6 +744,42 @@ function formatMetric(value, suffix) {
   return `${Number(value).toLocaleString('es-MX', {
     maximumFractionDigits: 1,
   })}${suffix}`
+}
+
+function getTokenPayload(token) {
+  try {
+    const [, payload] = token.split('.')
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const json = decodeURIComponent(
+      window
+        .atob(base64)
+        .split('')
+        .map((character) => `%${`00${character.charCodeAt(0).toString(16)}`.slice(-2)}`)
+        .join(''),
+    )
+
+    return JSON.parse(json)
+  } catch (error) {
+    return null
+  }
+}
+
+function isTokenExpired(token) {
+  const payload = getTokenPayload(token)
+  if (!payload?.exp) {
+    return true
+  }
+
+  return payload.exp * 1000 <= Date.now()
+}
+
+function getTokenExpirationDelay(token) {
+  const payload = getTokenPayload(token)
+  if (!payload?.exp) {
+    return null
+  }
+
+  return Math.max(payload.exp * 1000 - Date.now(), 0)
 }
 
 export default App
