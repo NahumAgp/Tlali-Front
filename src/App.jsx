@@ -15,6 +15,61 @@ const initialForm = {
   batteryVoltage: '3.7',
 }
 
+const sensorDefinitions = [
+  {
+    key: 'temperatureCelsius',
+    label: 'Temperatura',
+    shortLabel: 'Temp',
+    suffix: ' C',
+    healthyMin: 18,
+    healthyMax: 30,
+    min: 0,
+    max: 45,
+    accent: 'emerald',
+    lowText: 'Frio',
+    highText: 'Caliente',
+  },
+  {
+    key: 'humidityPercent',
+    label: 'Humedad aire',
+    shortLabel: 'Aire',
+    suffix: '%',
+    healthyMin: 45,
+    healthyMax: 80,
+    min: 0,
+    max: 100,
+    accent: 'sky',
+    lowText: 'Seco',
+    highText: 'Humedo',
+  },
+  {
+    key: 'soilMoisturePercent',
+    label: 'Humedad suelo',
+    shortLabel: 'Suelo',
+    suffix: '%',
+    healthyMin: 35,
+    healthyMax: 70,
+    min: 0,
+    max: 100,
+    accent: 'amber',
+    lowText: 'Riego',
+    highText: 'Saturado',
+  },
+  {
+    key: 'lightLux',
+    label: 'Luz',
+    shortLabel: 'Luz',
+    suffix: ' lx',
+    healthyMin: 500,
+    healthyMax: 5000,
+    min: 0,
+    max: 8000,
+    accent: 'lime',
+    lowText: 'Baja',
+    highText: 'Alta',
+  },
+]
+
 function App() {
   const [route, setRoute] = useState(() => window.location.pathname)
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY))
@@ -443,15 +498,8 @@ function Dashboard({ auth, navigate }) {
   }, [auth.token])
 
   const latest = readings[0]
-  const metrics = useMemo(
-    () => [
-      ['Temperatura', formatMetric(latest?.temperatureCelsius, ' C'), 'border-l-emerald-500'],
-      ['Humedad aire', formatMetric(latest?.humidityPercent, '%'), 'border-l-sky-500'],
-      ['Humedad suelo', formatMetric(latest?.soilMoisturePercent, '%'), 'border-l-amber-500'],
-      ['Luz', formatMetric(latest?.lightLux, ' lx'), 'border-l-lime-500'],
-    ],
-    [latest],
-  )
+  const metrics = useMemo(() => buildSensorMetrics(latest), [latest])
+  const greenhouseState = useMemo(() => getGreenhouseState(metrics), [metrics])
 
   async function loadReadings() {
     try {
@@ -556,31 +604,198 @@ function Dashboard({ auth, navigate }) {
           </div>
         </header>
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {metrics.map(([label, value, accent]) => (
-            <article
-              className={`rounded-lg border border-slate-200 border-l-4 bg-white p-4 shadow-sm ${accent}`}
-              key={label}
-            >
-              <p className="text-sm font-medium text-slate-500">{label}</p>
-              <p className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
-                {value}
-              </p>
-            </article>
+        <EnvironmentSummary
+          latest={latest}
+          readingsCount={readings.length}
+          state={greenhouseState}
+        />
+
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {metrics.map((metric) => (
+            <MetricCard key={metric.key} metric={metric} />
           ))}
         </section>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-          <ReadingsTable loadReadings={loadReadings} readings={readings} />
-          <ReadingForm
-            form={form}
-            handleSubmit={handleSubmit}
-            message={message}
-            updateField={updateField}
-          />
+          <div className="grid gap-6">
+            <SensorTrend readings={readings} />
+            <ReadingsTable loadReadings={loadReadings} readings={readings} />
+          </div>
+          <div className="grid content-start gap-6">
+            <DevicePanel latest={latest} />
+            <ReadingForm
+              form={form}
+              handleSubmit={handleSubmit}
+              message={message}
+              updateField={updateField}
+            />
+          </div>
         </div>
       </div>
     </section>
+  )
+}
+
+function EnvironmentSummary({ latest, readingsCount, state }) {
+  return (
+    <section className="grid gap-3 lg:grid-cols-[1fr_220px_220px]">
+      <article className={`rounded-lg border bg-white p-5 shadow-sm ${state.borderClass}`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+              Estado del invernadero
+            </p>
+            <h2 className={`mt-2 text-3xl font-semibold tracking-normal ${state.textClass}`}>
+              {state.label}
+            </h2>
+          </div>
+          <span className={`rounded-md px-3 py-1.5 text-sm font-semibold ${state.badgeClass}`}>
+            {state.badge}
+          </span>
+        </div>
+        <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600">{state.message}</p>
+      </article>
+
+      <SummaryTile
+        label="Ultima lectura"
+        value={latest ? new Date(latest.receivedAt).toLocaleTimeString('es-MX') : '--'}
+        helper={latest ? new Date(latest.receivedAt).toLocaleDateString('es-MX') : 'Sin datos'}
+      />
+      <SummaryTile
+        label="Muestras"
+        value={readingsCount}
+        helper={readingsCount === 1 ? 'lectura reciente' : 'lecturas recientes'}
+      />
+    </section>
+  )
+}
+
+function SummaryTile({ helper, label, value }) {
+  return (
+    <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tracking-normal text-slate-950">{value}</p>
+      <p className="mt-1 text-sm text-slate-500">{helper}</p>
+    </article>
+  )
+}
+
+function MetricCard({ metric }) {
+  return (
+    <article className={`rounded-lg border border-slate-200 border-l-4 bg-white p-4 shadow-sm ${metric.borderClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{metric.label}</p>
+          <p className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
+            {metric.formattedValue}
+          </p>
+        </div>
+        <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ${metric.badgeClass}`}>
+          {metric.statusLabel}
+        </span>
+      </div>
+
+      <div className="mt-4 h-2 rounded-full bg-slate-100">
+        <div
+          className={`h-2 rounded-full ${metric.barClass}`}
+          style={{ width: `${metric.percent}%` }}
+        />
+      </div>
+      <div className="mt-2 flex justify-between text-xs font-medium text-slate-400">
+        <span>{formatMetric(metric.min, metric.suffix)}</span>
+        <span>{formatMetric(metric.max, metric.suffix)}</span>
+      </div>
+    </article>
+  )
+}
+
+function SensorTrend({ readings }) {
+  const chartReadings = readings.slice(0, 8).reverse()
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-1 border-b border-slate-100 pb-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Tendencia de sensores</h2>
+          <p className="text-sm text-slate-500">Comparacion visual de las ultimas lecturas.</p>
+        </div>
+        <p className="text-sm font-medium text-slate-500">
+          {chartReadings.length} muestras
+        </p>
+      </div>
+
+      {chartReadings.length === 0 ? (
+        <p className="py-10 text-sm text-slate-500">Aun no hay datos para graficar.</p>
+      ) : (
+        <div className="mt-4 grid gap-4">
+          {sensorDefinitions.map((definition) => (
+            <TrendRow
+              definition={definition}
+              key={definition.key}
+              readings={chartReadings}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function TrendRow({ definition, readings }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[110px_1fr] sm:items-center">
+      <p className="text-sm font-semibold text-slate-700">{definition.label}</p>
+      <div className="flex h-20 items-end gap-1 rounded-md bg-slate-50 px-2 py-2">
+        {readings.map((reading) => {
+          const value = toNumber(reading[definition.key])
+          const percent = getPercent(value, definition.min, definition.max)
+
+          return (
+            <div className="flex min-w-7 flex-1 flex-col items-center gap-1" key={`${definition.key}-${reading.id}`}>
+              <div className="flex h-12 w-full items-end justify-center">
+                <span
+                  className={`w-full rounded-t-sm ${getAccentClasses(definition.accent).bar}`}
+                  style={{ height: `${Math.max(percent, value === null ? 0 : 8)}%` }}
+                  title={formatMetric(value, definition.suffix)}
+                />
+              </div>
+              <span className="text-[10px] font-medium text-slate-400">
+                {new Date(reading.receivedAt).toLocaleTimeString('es-MX', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function DevicePanel({ latest }) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 className="text-base font-semibold text-slate-900">Nodo sensor</h2>
+      <dl className="mt-4 grid gap-3 text-sm">
+        <DeviceStat label="Dispositivo" value={latest?.deviceId ?? '--'} />
+        <DeviceStat label="Invernadero" value={latest?.greenhouseId ?? '--'} />
+        <DeviceStat label="Bateria" value={formatMetric(latest?.batteryVoltage, ' V')} />
+        <DeviceStat
+          label="Registrada"
+          value={latest ? new Date(latest.recordedAt ?? latest.receivedAt).toLocaleString('es-MX') : '--'}
+        />
+      </dl>
+    </section>
+  )
+}
+
+function DeviceStat({ label, value }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+      <dt className="font-medium text-slate-500">{label}</dt>
+      <dd className="text-right font-semibold text-slate-900">{value}</dd>
+    </div>
   )
 }
 
@@ -744,6 +959,137 @@ function formatMetric(value, suffix) {
   return `${Number(value).toLocaleString('es-MX', {
     maximumFractionDigits: 1,
   })}${suffix}`
+}
+
+function buildSensorMetrics(latest) {
+  return sensorDefinitions.map((definition) => {
+    const value = toNumber(latest?.[definition.key])
+    const status = getSensorStatus(value, definition)
+    const accentClasses = getAccentClasses(definition.accent)
+
+    return {
+      ...definition,
+      value,
+      formattedValue: formatMetric(value, definition.suffix),
+      percent: getPercent(value, definition.min, definition.max),
+      status: status.key,
+      statusLabel: status.label,
+      badgeClass: status.badgeClass,
+      borderClass: accentClasses.border,
+      barClass: accentClasses.bar,
+    }
+  })
+}
+
+function getSensorStatus(value, definition) {
+  if (value === null) {
+    return {
+      key: 'empty',
+      label: 'Sin dato',
+      badgeClass: 'bg-slate-100 text-slate-600',
+    }
+  }
+
+  if (value < definition.healthyMin) {
+    return {
+      key: 'low',
+      label: definition.lowText,
+      badgeClass: 'bg-amber-100 text-amber-800',
+    }
+  }
+
+  if (value > definition.healthyMax) {
+    return {
+      key: 'high',
+      label: definition.highText,
+      badgeClass: 'bg-rose-100 text-rose-800',
+    }
+  }
+
+  return {
+    key: 'healthy',
+    label: 'Normal',
+    badgeClass: 'bg-emerald-100 text-emerald-800',
+  }
+}
+
+function getGreenhouseState(metrics) {
+  const activeMetrics = metrics.filter((metric) => metric.value !== null)
+  const alerts = activeMetrics.filter((metric) => metric.status !== 'healthy')
+
+  if (activeMetrics.length === 0) {
+    return {
+      label: 'Sin lecturas',
+      badge: 'Esperando sensores',
+      message: 'Cuando el ESP32 envie datos, aqui veras el estado general del invernadero.',
+      borderClass: 'border-slate-200',
+      textClass: 'text-slate-700',
+      badgeClass: 'bg-slate-100 text-slate-700',
+    }
+  }
+
+  if (alerts.length === 0) {
+    return {
+      label: 'Condiciones estables',
+      badge: 'Normal',
+      message: 'Temperatura, humedad, suelo y luz estan dentro de los rangos saludables configurados.',
+      borderClass: 'border-emerald-200',
+      textClass: 'text-emerald-800',
+      badgeClass: 'bg-emerald-100 text-emerald-800',
+    }
+  }
+
+  const alertText = alerts
+    .map((metric) => `${metric.label}: ${metric.statusLabel.toLowerCase()}`)
+    .join(', ')
+
+  return {
+    label: alerts.length > 1 ? 'Revisar ambiente' : 'Atencion requerida',
+    badge: `${alerts.length} alerta${alerts.length > 1 ? 's' : ''}`,
+    message: `Lecturas fuera de rango: ${alertText}. Ajusta ventilacion, riego o sombra segun el sensor afectado.`,
+    borderClass: 'border-amber-200',
+    textClass: 'text-amber-800',
+    badgeClass: 'bg-amber-100 text-amber-800',
+  }
+}
+
+function getAccentClasses(accent) {
+  const classes = {
+    amber: {
+      bar: 'bg-amber-500',
+      border: 'border-l-amber-500',
+    },
+    emerald: {
+      bar: 'bg-emerald-500',
+      border: 'border-l-emerald-500',
+    },
+    lime: {
+      bar: 'bg-lime-500',
+      border: 'border-l-lime-500',
+    },
+    sky: {
+      bar: 'bg-sky-500',
+      border: 'border-l-sky-500',
+    },
+  }
+
+  return classes[accent] ?? classes.emerald
+}
+
+function getPercent(value, min, max) {
+  if (value === null) {
+    return 0
+  }
+
+  return Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100))
+}
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  return Number(value)
 }
 
 function getTokenPayload(token) {
