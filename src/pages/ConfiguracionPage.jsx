@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
 import {
   createCropFromName,
+  getCropAgeDays,
+  getCropStage,
+  getCropStageTiming,
+  getCropParameters,
   loadActiveCropId,
   loadCropSettings,
   loadNodeAssignments,
@@ -25,6 +29,11 @@ export default function ConfiguracionPage({ auth, navigate, route }) {
     () => crops.find((crop) => crop.id === selectedCropId) ?? crops[0],
     [crops, selectedCropId],
   )
+  const selectedStageTiming = getCropStageTiming(selectedCrop)
+  const selectedStage = selectedCrop?.stages?.find((stage) => stage.id === selectedCrop?.activeStageId) ?? getCropStage(selectedCrop)
+  const effectiveStage = selectedStageTiming.stage
+  const selectedCropAgeDays = getCropAgeDays(selectedCrop)
+  const selectedParameters = selectedStage?.parameters ?? getCropParameters(selectedCrop)
   const hardwareRows = useMemo(() => {
     const sensorNodes = firebaseNodes
       .filter((node) => node.type === 'sensor' || node.node?.toLowerCase().includes('npk'))
@@ -70,17 +79,48 @@ export default function ConfiguracionPage({ auth, navigate, route }) {
   function updateRange(parameterKey, field, value) {
     persistCrops(crops.map((crop) => {
       if (crop.id !== selectedCrop.id) return crop
+      const nextStages = crop.stages.map((stage) => {
+        if (stage.id !== selectedStage.id) return stage
+        return {
+          ...stage,
+          parameters: {
+            ...stage.parameters,
+            [parameterKey]: {
+              ...(stage.parameters[parameterKey] ?? {}),
+              [field]: value,
+            },
+          },
+        }
+      })
       return {
         ...crop,
-        parameters: {
-          ...crop.parameters,
-          [parameterKey]: {
-            ...(crop.parameters[parameterKey] ?? {}),
-            [field]: value,
-          },
-        },
+        stages: nextStages,
       }
     }))
+  }
+
+  function updateActiveStage(stageId) {
+    persistCrops(crops.map((crop) => (
+      crop.id === selectedCrop.id
+        ? { ...crop, activeStageId: stageId, activeStageStartedAt: todayLocalDate() }
+        : crop
+    )))
+  }
+
+  function updateStageStartDate(value) {
+    persistCrops(crops.map((crop) => (
+      crop.id === selectedCrop.id
+        ? { ...crop, activeStageStartedAt: value || todayLocalDate() }
+        : crop
+    )))
+  }
+
+  function updateCropStartDate(value) {
+    persistCrops(crops.map((crop) => (
+      crop.id === selectedCrop.id
+        ? { ...crop, cropStartedAt: value || todayLocalDate() }
+        : crop
+    )))
   }
 
   function upsertNodeAssignment(nodeName, changes) {
@@ -196,7 +236,8 @@ export default function ConfiguracionPage({ auth, navigate, route }) {
                         />
                       </td>
                       <td className="text-tlali-muted">
-                        Usa mínimos y máximos de <span className="font-bold text-tlali-ink">{crop?.name ?? 'cultivo'}</span>.
+                        Usa <span className="font-bold text-tlali-ink">{crop?.name ?? 'cultivo'}</span>
+                        {crop?.activeStageId && <span> · {getCropStage(crop)?.name}</span>}.
                       </td>
                       <td className="text-right">
                         <button className="secondary-button" disabled={!isAdmin} onClick={() => removeNodeAssignment(nodeName)} type="button">Quitar</button>
@@ -260,21 +301,80 @@ export default function ConfiguracionPage({ auth, navigate, route }) {
               <p className="eyebrow">Parámetros</p>
               <h2 className="mt-1 text-xl font-bold">{selectedCrop?.name ?? 'Cultivo'}</h2>
               <p className="mt-1 text-sm text-tlali-muted">{selectedCrop?.description}</p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                {selectedCrop?.stages?.map((stage) => (
+                  <button
+                    className={`min-h-[112px] rounded-xl border px-3 py-3 text-left transition ${selectedStage?.id === stage.id ? 'border-tlali-jade-dark bg-[#d8eee7]' : 'border-[#e1dbcd] bg-[#fcf8f0]'}`}
+                    disabled={!isAdmin}
+                    key={stage.id}
+                    onClick={() => updateActiveStage(stage.id)}
+                    type="button"
+                  >
+                    <span className="block text-sm font-black">{stage.name}</span>
+                    <span className="mt-2 block text-xs font-bold text-[#4f6258]">{stage.durationDays} días</span>
+                    <span className="mt-1 block text-xs leading-5 text-tlali-muted">{stage.from} → {stage.to}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs font-semibold text-[#687169]">
+                Etapa configurada: <span className="text-tlali-ink">{selectedStage?.name}</span>
+                {effectiveStage?.id !== selectedStage?.id && <span> · alertas usando {effectiveStage?.name}</span>}
+              </p>
+              <div className="mt-3 grid gap-3 rounded-xl border border-[#e1dbcd] bg-[#fcf8f0] px-4 py-3 lg:grid-cols-[220px_220px_1fr] lg:items-end">
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  Inicio del cultivo
+                  <input
+                    className="tlali-input"
+                    disabled={!isAdmin}
+                    max={todayLocalDate()}
+                    onChange={(event) => updateCropStartDate(event.target.value)}
+                    type="date"
+                    value={selectedCrop?.cropStartedAt ?? todayLocalDate()}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  Inicio de etapa
+                  <input
+                    className="tlali-input"
+                    disabled={!isAdmin}
+                    max={todayLocalDate()}
+                    onChange={(event) => updateStageStartDate(event.target.value)}
+                    type="date"
+                    value={selectedCrop?.activeStageStartedAt ?? todayLocalDate()}
+                  />
+                </label>
+                <div className="grid gap-2 sm:grid-cols-4">
+                  <StageCounter label="Edad del cultivo" value={selectedCropAgeDays} />
+                  <StageCounter label="Desde inicio de etapa" value={selectedStageTiming.totalDaysElapsed} />
+                  <StageCounter label="En etapa calculada" value={selectedStageTiming.daysElapsed} />
+                  <StageCounter label="Límite de etapa" value={selectedStageTiming.maxDays} />
+                </div>
+              </div>
+              {selectedStageTiming.isAutoAdvanced && (
+                <div className="mt-3 rounded-xl border border-[#ead5a8] bg-[#fff5dc] px-4 py-3 text-sm text-[#75501d]">
+                  El calendario ya avanzó desde {selectedStageTiming.configuredStage.name} hacia {selectedStageTiming.stage.name}. Los rangos y alertas usan la etapa actual calculada.
+                </div>
+              )}
+              {selectedStage?.guidance && (
+                <div className="mt-3 rounded-xl border border-[#e1dbcd] bg-[#fcf8f0] px-4 py-3">
+                  <p className="text-xs font-black uppercase text-[#687169]">Manejo recomendado</p>
+                  <p className="mt-2 text-sm leading-6 text-tlali-muted">{selectedStage.guidance}</p>
+                </div>
+              )}
             </div>
             <div className="overflow-auto">
-              <table className="w-full min-w-[760px] text-left text-xs">
+              <table className="w-full min-w-[720px] text-left text-xs">
                 <thead className="bg-[#f8f3e9] text-[#687169]">
                   <tr>
                     <th>Sensor</th>
                     <th>Unidad</th>
                     <th>Mínimo</th>
                     <th>Máximo</th>
-                    <th>Uso</th>
                   </tr>
                 </thead>
                 <tbody>
                   {SENSOR_PARAMETERS.map((parameter) => {
-                    const range = selectedCrop?.parameters?.[parameter.key] ?? { min: parameter.min, max: parameter.max }
+                    const range = selectedParameters?.[parameter.key] ?? { min: parameter.min, max: parameter.max }
                     return (
                       <tr className="border-t border-[#ece6da]" key={parameter.key}>
                         <td className="font-semibold">{parameter.label}</td>
@@ -299,7 +399,6 @@ export default function ConfiguracionPage({ auth, navigate, route }) {
                             value={range.max}
                           />
                         </td>
-                        <td className="text-tlali-muted">Fuera de este rango genera alerta.</td>
                       </tr>
                     )
                   })}
@@ -311,4 +410,17 @@ export default function ConfiguracionPage({ auth, navigate, route }) {
       </div>
     </div>
   )
+}
+
+function StageCounter({ label, value }) {
+  return (
+    <div className="rounded-xl border border-[#e1dbcd] bg-white px-3 py-2">
+      <p className="text-[10px] font-bold uppercase text-tlali-muted">{label}</p>
+      <p className="mt-1 text-2xl font-black text-tlali-jade-dark">{value}</p>
+    </div>
+  )
+}
+
+function todayLocalDate() {
+  return new Date().toLocaleDateString('en-CA')
 }

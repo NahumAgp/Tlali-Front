@@ -3,28 +3,142 @@ export const ACTIVE_CROP_KEY = 'tlali_active_crop_id'
 export const NODE_ASSIGNMENTS_KEY = 'tlali_node_assignments'
 
 export const SENSOR_PARAMETERS = [
-  { key: 'soilMoisturePercent', label: 'Humedad capacitiva', unit: '%', min: 35, max: 70 },
-  { key: 'substrateHumidityPercent', label: 'Humedad del sustrato', unit: '%', min: 35, max: 70 },
-  { key: 'soilTemperatureC', label: 'Temperatura del sustrato', unit: '°C', min: 18, max: 28 },
-  { key: 'temperatureCelsius', label: 'Temperatura ambiente', unit: '°C', min: 18, max: 30 },
-  { key: 'ph', label: 'pH del sustrato', unit: 'pH', min: 5.8, max: 6.8 },
-  { key: 'humidityPercent', label: 'Humedad del aire', unit: '%', min: 45, max: 80 },
-  { key: 'conductivityUsCm', label: 'Conductividad', unit: 'µS/cm', min: 800, max: 2500 },
-  { key: 'nitrogenMgKg', label: 'Nitrógeno', unit: 'mg/kg', min: 20, max: 80 },
-  { key: 'phosphorusMgKg', label: 'Fósforo', unit: 'mg/kg', min: 10, max: 50 },
-  { key: 'potassiumMgKg', label: 'Potasio', unit: 'mg/kg', min: 30, max: 120 },
-  { key: 'lightLux', label: 'Luminosidad', unit: 'lux', min: 500, max: 60000 },
+  { key: 'soilMoisturePercent', label: 'Humedad capacitiva', unit: '%', min: 25, max: 85, source: 'Video Agrocejo: 60-80% H.A.; tolerancia operativa nocturna ampliada para sensores capacitivos.' },
+  { key: 'substrateHumidityPercent', label: 'Humedad del sustrato', unit: '%', min: 25, max: 85, source: 'Video Agrocejo: 60-80% H.A.; tolerancia operativa nocturna ampliada para sensores capacitivos.' },
+  { key: 'soilTemperatureC', label: 'Temperatura del sustrato', unit: '°C', min: 20, max: 25, source: 'Video Agrocejo: temperatura del sustrato óptima 20-25 °C.' },
+  { key: 'temperatureCelsius', label: 'Temperatura ambiente', unit: '°C', min: 23, max: 26, source: 'Video Agrocejo: rangos por etapa de jitomate en invernadero.' },
+  { key: 'ph', label: 'pH del sustrato', unit: 'pH', min: 5.2, max: 6.8, source: 'Oklahoma State Extension: medio sin suelo 5.5-6.5; IFAS: solución final 5.8-6.2.' },
+  { key: 'humidityPercent', label: 'Humedad del aire', unit: '%', min: 60, max: 95, source: 'Video Agrocejo: 60-80%; tolerancia nocturna ampliada hasta 95% para evitar falsas alertas.' },
+  { key: 'conductivityUsCm', label: 'Conductividad', unit: 'µS/cm', min: 2500, max: 3500, source: 'UF/IFAS HS1274: EC final 1.5-3.5 dS/m, sube conforme madura el cultivo.' },
+  { key: 'nitrogenMgKg', label: 'Nitrógeno', unit: 'mg/kg', min: 100, max: 199, source: 'Oklahoma State Extension: NO3-N 40-199 ppm; IFAS: N aumenta por etapa.' },
+  { key: 'phosphorusMgKg', label: 'Fósforo', unit: 'mg/kg', min: 6, max: 15, source: 'Oklahoma State Extension: P 3-15 ppm en extracto saturado.' },
+  { key: 'potassiumMgKg', label: 'Potasio', unit: 'mg/kg', min: 150, max: 249, source: 'Oklahoma State Extension: K 60-249 ppm; IFAS: K aumenta en fructificación.' },
+  { key: 'lightLux', label: 'Luminosidad', unit: 'lux', min: 0, max: 65000, source: 'Video Agrocejo: radiación óptima 3000 pie-bujía, equivalente aproximado a 32,000 lux.' },
+]
+
+export const TOMATO_STAGE_TEMPLATES = [
+  {
+    id: 'germinacion',
+    name: 'Germinación y plántula',
+    from: 'Siembra',
+    to: 'Emergencia',
+    durationDays: '4-10',
+    description: 'Arranque estable: emergencia esperada en 4-10 días, con temperatura de aire 20-30 °C y sustrato 15-20 °C.',
+    guidance: 'En siembra, cubrir la semilla con 0.5 cm de sustrato o vermiculita. Regar ligero con agua de buena calidad, EC menor a 1 mmho/cm si hay sales presentes, y temperatura del agua entre 20 y 30 °C. Puede usarse solución de arranque con 50 ppm de fósforo y 50 ppm de potasio como coadyuvantes de germinación.',
+    parameters: {
+      soilMoisturePercent: { min: 25, max: 85 },
+      substrateHumidityPercent: { min: 25, max: 85 },
+      soilTemperatureC: { min: 15, max: 20 },
+      temperatureCelsius: { min: 20, max: 30 },
+      ph: { min: 5.2, max: 6.8 },
+      humidityPercent: { min: 60, max: 95 },
+      conductivityUsCm: { min: 500, max: 1200 },
+      nitrogenMgKg: { min: 20, max: 80 },
+      phosphorusMgKg: { min: 3, max: 15 },
+      potassiumMgKg: { min: 40, max: 120 },
+      lightLux: { min: 0, max: 32000 },
+    },
+  },
+  {
+    id: 'crecimiento',
+    name: 'Crecimiento vegetativo',
+    from: 'Primeras hojas verdaderas',
+    to: 'Aparición de primeros botones florales',
+    durationDays: '45-60',
+    description: 'Formación de estructura durante 45-60 días: controlar vigor, evitar exceso de nitrógeno y sostener raíces activas.',
+    guidance: 'Buscar crecimiento balanceado. Si la planta se vuelve demasiado vegetativa, revisar exceso de nitrógeno, baja radiación, alta humedad o diferencia térmica día/noche demasiado marcada.',
+    parameters: {
+      soilMoisturePercent: { min: 25, max: 85 },
+      substrateHumidityPercent: { min: 25, max: 85 },
+      soilTemperatureC: { min: 20, max: 25 },
+      temperatureCelsius: { min: 20, max: 25 },
+      ph: { min: 5.2, max: 6.8 },
+      humidityPercent: { min: 60, max: 95 },
+      conductivityUsCm: { min: 1800, max: 2400 },
+      nitrogenMgKg: { min: 140, max: 220 },
+      phosphorusMgKg: { min: 35, max: 55 },
+      potassiumMgKg: { min: 180, max: 240 },
+      lightLux: { min: 0, max: 65000 },
+    },
+  },
+  {
+    id: 'floracion',
+    name: 'Floración y polinización',
+    from: 'Aparición de primeros botones florales',
+    to: 'Cuajado de primeros frutos',
+    durationDays: '55-75',
+    description: 'Etapa crítica de 55-75 días: proteger polen, evitar calor alto y mantener humedad sin saturar.',
+    guidance: 'Priorizar polinización y amarre. Evitar temperaturas mayores a 30-32 °C por periodos prolongados, porque cae la viabilidad del polen y aumenta aborto floral.',
+    parameters: {
+      soilMoisturePercent: { min: 25, max: 85 },
+      substrateHumidityPercent: { min: 25, max: 85 },
+      soilTemperatureC: { min: 20, max: 25 },
+      temperatureCelsius: { min: 18, max: 26 },
+      ph: { min: 5.2, max: 6.8 },
+      humidityPercent: { min: 60, max: 95 },
+      conductivityUsCm: { min: 2000, max: 2600 },
+      nitrogenMgKg: { min: 120, max: 200 },
+      phosphorusMgKg: { min: 45, max: 65 },
+      potassiumMgKg: { min: 230, max: 300 },
+      lightLux: { min: 0, max: 65000 },
+    },
+  },
+  {
+    id: 'fructificacion',
+    name: 'Fructificación',
+    from: 'Cuajado de primeros frutos',
+    to: 'Fin de crecimiento de primeros frutos',
+    durationDays: '90-175',
+    description: 'Llenado de fruto entre 90-175 días: más demanda de agua, potasio y estabilidad térmica para evitar aborto y BER.',
+    guidance: 'Aumenta la demanda de agua y potasio. Mantener humedad estable del sustrato, evitar acumulación de sales y vigilar desbalances K/Ca/Mg para reducir pudrición apical.',
+    parameters: {
+      soilMoisturePercent: { min: 25, max: 85 },
+      substrateHumidityPercent: { min: 25, max: 85 },
+      soilTemperatureC: { min: 20, max: 25 },
+      temperatureCelsius: { min: 23, max: 26 },
+      ph: { min: 5.2, max: 6.8 },
+      humidityPercent: { min: 60, max: 95 },
+      conductivityUsCm: { min: 2400, max: 3200 },
+      nitrogenMgKg: { min: 140, max: 220 },
+      phosphorusMgKg: { min: 50, max: 70 },
+      potassiumMgKg: { min: 300, max: 400 },
+      lightLux: { min: 0, max: 65000 },
+    },
+  },
+  {
+    id: 'maduracion',
+    name: 'Maduración',
+    from: 'Fin de crecimiento de primeros frutos',
+    to: 'Primera recolección',
+    durationDays: '105-135',
+    description: 'Maduración hacia primera recolección, 105-135 días: temperatura moderada y sales bajo control.',
+    guidance: 'Para color y calidad, mantener 22-26 °C y evitar superar 29 °C. Si la EC sube por concentración de sales, ajustar fertirriego y revisar drenaje/lixiviado.',
+    parameters: {
+      soilMoisturePercent: { min: 25, max: 85 },
+      substrateHumidityPercent: { min: 25, max: 85 },
+      soilTemperatureC: { min: 20, max: 25 },
+      temperatureCelsius: { min: 22, max: 26 },
+      ph: { min: 5.2, max: 6.8 },
+      humidityPercent: { min: 60, max: 95 },
+      conductivityUsCm: { min: 2200, max: 3000 },
+      nitrogenMgKg: { min: 120, max: 200 },
+      phosphorusMgKg: { min: 45, max: 65 },
+      potassiumMgKg: { min: 280, max: 380 },
+      lightLux: { min: 0, max: 65000 },
+    },
+  },
 ]
 
 export const DEFAULT_CROPS = [
   {
     id: 'jitomate',
     name: 'Jitomate',
-    description: 'Rangos base para monitoreo general de jitomate en invernadero.',
-    parameters: Object.fromEntries(SENSOR_PARAMETERS.map((parameter) => [
-      parameter.key,
-      { min: parameter.min, max: parameter.max },
-    ])),
+    description: 'Rangos profesionales por etapa para jitomate en invernadero.',
+    activeStageId: 'fructificacion',
+    activeStageStartedAt: todayLocalDate(),
+    cropStartedAt: todayLocalDate(),
+    stages: TOMATO_STAGE_TEMPLATES,
+    parameters: getStageParameters('fructificacion', TOMATO_STAGE_TEMPLATES),
   },
 ]
 
@@ -42,14 +156,14 @@ export function loadCropSettings() {
     const saved = JSON.parse(window.localStorage.getItem(CROP_SETTINGS_KEY) ?? 'null')
     if (!Array.isArray(saved) || !saved.length) return DEFAULT_CROPS
     const filtered = saved.filter((crop) => crop.id !== 'lechuga')
-    return filtered.length ? filtered : DEFAULT_CROPS
+    return filtered.length ? filtered.map(normalizeCrop) : DEFAULT_CROPS
   } catch {
     return DEFAULT_CROPS
   }
 }
 
 export function saveCropSettings(crops) {
-  const cleanCrops = crops.filter((crop) => crop.id !== 'lechuga')
+  const cleanCrops = crops.filter((crop) => crop.id !== 'lechuga').map(normalizeCrop)
   window.localStorage.setItem(CROP_SETTINGS_KEY, JSON.stringify(cleanCrops))
   window.dispatchEvent(new Event('tlali-crop-settings-change'))
   return cleanCrops
@@ -69,6 +183,44 @@ export function getActiveCrop() {
   const crops = loadCropSettings()
   const activeId = loadActiveCropId()
   return crops.find((crop) => crop.id === activeId) ?? crops[0]
+}
+
+export function getCropStage(crop) {
+  return getCropStageTiming(crop).stage
+}
+
+export function getCropStageTiming(crop) {
+  const stages = crop?.stages?.length ? crop.stages : TOMATO_STAGE_TEMPLATES
+  const configuredStage = stages.find((stage) => stage.id === crop?.activeStageId) ?? stages[0]
+  let stageIndex = Math.max(0, stages.findIndex((stage) => stage.id === configuredStage.id))
+  let daysElapsed = getDaysElapsed(crop?.activeStageStartedAt)
+  let consumedDays = 0
+
+  while (stageIndex < stages.length - 1) {
+    const maxDays = getStageMaxDays(stages[stageIndex])
+    if (daysElapsed < maxDays) break
+    daysElapsed -= maxDays
+    consumedDays += maxDays
+    stageIndex += 1
+  }
+
+  return {
+    configuredStage,
+    daysElapsed,
+    effectiveStartedAt: addDays(crop?.activeStageStartedAt, consumedDays),
+    isAutoAdvanced: configuredStage.id !== stages[stageIndex]?.id,
+    maxDays: getStageMaxDays(stages[stageIndex]),
+    stage: stages[stageIndex] ?? configuredStage,
+    totalDaysElapsed: getDaysElapsed(crop?.activeStageStartedAt),
+  }
+}
+
+export function getCropParameters(crop) {
+  return getCropStage(crop)?.parameters ?? crop?.parameters ?? defaultParameterMap()
+}
+
+export function getCropAgeDays(crop) {
+  return getDaysElapsed(crop?.cropStartedAt)
 }
 
 export function loadNodeAssignments() {
@@ -105,11 +257,90 @@ export function createCropFromName(name) {
     id,
     name: cleanName,
     description: 'Nuevo cultivo configurado por el administrador.',
-    parameters: Object.fromEntries(SENSOR_PARAMETERS.map((parameter) => [
-      parameter.key,
-      { min: parameter.min, max: parameter.max },
-    ])),
+    activeStageId: 'crecimiento',
+    activeStageStartedAt: todayLocalDate(),
+    cropStartedAt: todayLocalDate(),
+    stages: TOMATO_STAGE_TEMPLATES.map((stage) => ({
+      ...stage,
+      parameters: cloneParameters(stage.parameters),
+    })),
+    parameters: getStageParameters('crecimiento', TOMATO_STAGE_TEMPLATES),
   }
+}
+
+function normalizeCrop(crop) {
+  const baseStages = crop?.id === 'jitomate' || !Array.isArray(crop?.stages) || !crop.stages.length
+    ? TOMATO_STAGE_TEMPLATES
+    : crop.stages
+  const stages = baseStages.map((stage) => ({
+    ...stage,
+    parameters: normalizeParameterMap(stage.parameters),
+  }))
+  const activeStageId = stages.some((stage) => stage.id === crop?.activeStageId)
+    ? crop.activeStageId
+    : stages[0]?.id
+  return {
+    ...crop,
+    description: crop?.description || 'Rangos por etapa para monitoreo del cultivo.',
+    activeStageId,
+    activeStageStartedAt: crop?.activeStageStartedAt || todayLocalDate(),
+    cropStartedAt: crop?.cropStartedAt || crop?.activeStageStartedAt || todayLocalDate(),
+    stages,
+    parameters: getStageParameters(activeStageId, stages),
+  }
+}
+
+function getStageParameters(stageId, stages) {
+  return cloneParameters(stages.find((stage) => stage.id === stageId)?.parameters ?? defaultParameterMap())
+}
+
+function normalizeParameterMap(parameters = {}) {
+  return Object.fromEntries(SENSOR_PARAMETERS.map((parameter) => [
+    parameter.key,
+    {
+      min: parameters?.[parameter.key]?.min ?? parameter.min,
+      max: parameters?.[parameter.key]?.max ?? parameter.max,
+    },
+  ]))
+}
+
+function defaultParameterMap() {
+  return Object.fromEntries(SENSOR_PARAMETERS.map((parameter) => [
+    parameter.key,
+    { min: parameter.min, max: parameter.max },
+  ]))
+}
+
+function cloneParameters(parameters) {
+  return Object.fromEntries(Object.entries(parameters).map(([key, range]) => [
+    key,
+    { min: range.min, max: range.max },
+  ]))
+}
+
+function getStageMaxDays(stage) {
+  const values = String(stage?.durationDays ?? '').match(/\d+/g)?.map(Number) ?? []
+  return values.length ? Math.max(...values) : 0
+}
+
+function getDaysElapsed(date) {
+  if (!date) return 0
+  const start = new Date(`${date}T00:00:00`)
+  if (Number.isNaN(start.getTime())) return 0
+  const today = new Date(`${todayLocalDate()}T00:00:00`)
+  return Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86400000))
+}
+
+function addDays(date, days) {
+  if (!date) return todayLocalDate()
+  const next = new Date(`${date}T00:00:00`)
+  if (Number.isNaN(next.getTime())) return todayLocalDate()
+  next.setDate(next.getDate() + days)
+  return next.toLocaleDateString('en-CA')
+}
+
+function todayLocalDate() {
+  return new Date().toLocaleDateString('en-CA')
 }
 
 function normalizeAssignments(assignments) {
@@ -131,3 +362,4 @@ function normalizeAssignments(assignments) {
 function sameNode(left, right) {
   return String(left).trim().toLowerCase() === String(right).trim().toLowerCase()
 }
+

@@ -1,14 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API_URL, initialReadingForm } from '../config/app.js'
 import { authorizedFetch } from '../lib/auth.js'
-import { getActiveCrop, getAssignmentForNode, getCropForNode, loadCropSettings, loadNodeAssignments } from '../lib/cropSettings.js'
+import { getActiveCrop, getAssignmentForNode, getCropForNode, getCropParameters, loadCropSettings, loadNodeAssignments } from '../lib/cropSettings.js'
 import { toReadingPayload } from '../lib/readings.js'
 import { buildSensorMetrics } from '../lib/sensors.js'
 
 const DAILY_CACHE_KEY = 'tlali-dashboard-readings'
 const ACTUATOR_DAILY_CACHE_KEY = 'tlali-actuator-readings'
 
-export default function useDashboardData(auth) {
+export const HISTORY_PERIODS = [
+  { key: 'day', label: 'Día', days: 1 },
+  { key: 'week', label: 'Semana', days: 7 },
+  { key: 'month', label: 'Mes', days: 30 },
+  { key: 'quarter', label: '3 meses', days: 90 },
+  { key: 'semester', label: '6 meses', days: 180 },
+  { key: 'year', label: 'Año', days: 365 },
+]
+
+export default function useDashboardData(auth, options = {}) {
+  const historyPeriod = options.historyPeriod ?? 'day'
   const [summary, setSummary] = useState(null)
   const [firebaseData, setFirebaseData] = useState(null)
   const [status, setStatus] = useState('checking')
@@ -28,7 +38,7 @@ export default function useDashboardData(auth) {
     loadDashboard()
     const timer = window.setInterval(loadDashboard, 10000)
     return () => window.clearInterval(timer)
-  }, [auth.token])
+  }, [auth.token, historyPeriod])
 
   useEffect(() => {
     const syncCrop = () => {
@@ -48,11 +58,12 @@ export default function useDashboardData(auth) {
     try {
       setStatus('checking')
       const today = new Date().toLocaleDateString('en-CA')
+      const range = getHistoryRange(historyPeriod)
       const [summaryResponse, firebaseResponse, sensorHistoryResponse, actuatorHistoryResponse] = await Promise.all([
         authorizedFetch(`${API_URL}/api/v1/sensor-readings/dashboard`, auth.token, {}, auth.onUnauthorized),
         authorizedFetch(`${API_URL}/api/v1/firebase/actual`, auth.token, {}, auth.onUnauthorized),
-        authorizedFetch(`${API_URL}/api/v1/firebase/history?type=sensor&date=${today}`, auth.token, {}, auth.onUnauthorized),
-        authorizedFetch(`${API_URL}/api/v1/firebase/history?type=actuator&date=${today}`, auth.token, {}, auth.onUnauthorized),
+        authorizedFetch(`${API_URL}/api/v1/firebase/history?type=sensor&startDate=${range.startDate}&endDate=${today}`, auth.token, {}, auth.onUnauthorized),
+        authorizedFetch(`${API_URL}/api/v1/firebase/history?type=actuator&startDate=${range.startDate}&endDate=${today}`, auth.token, {}, auth.onUnauthorized),
       ])
       if (!summaryResponse.ok) throw new Error(`HTTP ${summaryResponse.status}`)
       setSummary(await summaryResponse.json())
@@ -121,10 +132,12 @@ export default function useDashboardData(auth) {
   const liveActuatorReadings = mergeReadings(firebaseActuatorReading ? [firebaseActuatorReading] : [], historyActuatorReadings, cachedActuatorReadings)
   const todayReadings = useMemo(() => filterToday(liveReadings), [liveReadings])
   const todayActuatorReadings = useMemo(() => filterToday(liveActuatorReadings), [liveActuatorReadings])
+  const periodReadings = useMemo(() => filterByPeriod(liveReadings, historyPeriod), [historyPeriod, liveReadings])
+  const periodActuatorReadings = useMemo(() => filterByPeriod(liveActuatorReadings, historyPeriod), [historyPeriod, liveActuatorReadings])
   const readings = todayReadings.length ? todayReadings : liveReadings
   const actuatorReadings = todayActuatorReadings.length ? todayActuatorReadings : liveActuatorReadings
   const latest = firebaseReading ?? summary?.latestReading
-  const alerts = buildSensorMetrics(latest, cropForCurrentNode?.parameters).filter((metric) => metric.value !== null && metric.status !== 'healthy')
+  const alerts = buildSensorMetrics(latest, getCropParameters(cropForCurrentNode)).filter((metric) => metric.value !== null && metric.status !== 'healthy')
   const firebaseLastReceivedAt = latestFirebaseTimestamp(firebaseNodes)
   const firebaseOnline = firebaseNodes.some((node) => isRecentTimestamp(node.gateway?.recibidoUtc))
   const activeFirebaseNodes = firebaseNodes.length
@@ -155,6 +168,8 @@ export default function useDashboardData(auth) {
     loadDashboard,
     message,
     nodeAssignments,
+    periodActuatorReadings,
+    periodReadings,
     readings,
     setShowForm,
     showForm,
@@ -163,6 +178,17 @@ export default function useDashboardData(auth) {
     todayReadings,
     todayActuatorReadings,
     updateField,
+  }
+}
+
+export function getHistoryRange(periodKey) {
+  const period = HISTORY_PERIODS.find((item) => item.key === periodKey) ?? HISTORY_PERIODS[0]
+  const end = new Date()
+  const start = new Date(end)
+  start.setDate(start.getDate() - period.days + 1)
+  return {
+    endDate: end.toLocaleDateString('en-CA'),
+    startDate: start.toLocaleDateString('en-CA'),
   }
 }
 
@@ -232,6 +258,14 @@ function mergeReadings(...groups) {
 function filterToday(readings) {
   const today = new Date().toLocaleDateString('en-CA')
   return readings.filter((reading) => new Date(reading.receivedAt).toLocaleDateString('en-CA') === today)
+}
+
+function filterByPeriod(readings, periodKey) {
+  const period = HISTORY_PERIODS.find((item) => item.key === periodKey) ?? HISTORY_PERIODS[0]
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  start.setDate(start.getDate() - period.days + 1)
+  return readings.filter((reading) => new Date(reading.receivedAt) >= start)
 }
 
 function loadCachedDailyReadings() {

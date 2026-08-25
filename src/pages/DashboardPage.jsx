@@ -3,12 +3,14 @@ import {
   DashboardNav,
   StatusPill,
 } from '../components/dashboard/DashboardWidgets.jsx'
-import useDashboardData from '../hooks/useDashboardData.js'
+import useDashboardData, { HISTORY_PERIODS } from '../hooks/useDashboardData.js'
+import { getCropAgeDays, getCropParameters, getCropStage, getCropStageTiming } from '../lib/cropSettings.js'
 import { formatMetric, toNumber } from '../lib/sensors.js'
 
 export default function DashboardPage({ auth, navigate, route }) {
   const [clock, setClock] = useState(new Date())
-  const data = useDashboardData(auth)
+  const [historyPeriod, setHistoryPeriod] = useState('day')
+  const data = useDashboardData(auth, { historyPeriod })
   const {
     activeFirebaseNodes,
     activeCrop,
@@ -23,6 +25,8 @@ export default function DashboardPage({ auth, navigate, route }) {
     latest,
     liveSource,
     message,
+    periodActuatorReadings,
+    periodReadings,
     readings,
     status,
     summary,
@@ -37,41 +41,58 @@ export default function DashboardPage({ auth, navigate, route }) {
 
   const cropReadings = todayReadings.length ? todayReadings : readings
   const actuatorDayReadings = todayActuatorReadings.length ? todayActuatorReadings : actuatorReadings
+  const dashboardCropReadings = periodReadings.length ? periodReadings : cropReadings
+  const dashboardActuatorReadings = periodActuatorReadings.length ? periodActuatorReadings : actuatorDayReadings
+  const periodLabel = HISTORY_PERIODS.find((period) => period.key === historyPeriod)?.label ?? 'Día'
   const sourceOnline = liveSource ? firebaseOnline : summary?.gatewayOnline
   const live = cultivationNode?.data ?? {}
   const actuatorData = actuatorNode?.data ?? {}
+  const averages = useMemo(() => buildAverages(dashboardCropReadings), [dashboardCropReadings])
+  const actuatorAverages = useMemo(() => buildAverages(dashboardActuatorReadings), [dashboardActuatorReadings])
   const signal = getSignalDecision(cultivationNode ?? actuatorNode)
   const relayOneOn = Boolean(actuatorData.relay1On)
   const relayTwoOn = Boolean(actuatorData.relay2On)
   const irrigationLabel = relayOneOn || relayTwoOn ? 'Riego activo' : 'Riego en espera'
   const criticalAlerts = alerts.filter((alert) => alert.status !== 'healthy')
+  const activeStage = getCropStage(activeCrop)
+  const activeStageTiming = getCropStageTiming(activeCrop)
+  const cropAgeDays = getCropAgeDays(activeCrop)
+  const activeParameters = getCropParameters(activeCrop)
 
   const importantReadings = useMemo(() => ([
     {
-      helper: 'Zona de cultivo',
+      helper: `Promedio · ${periodLabel}`,
       label: 'Humedad del suelo',
-      state: getRangeState(latest?.soilMoisturePercent, activeCrop?.parameters?.soilMoisturePercent),
-      value: formatMetric(latest?.soilMoisturePercent, '%'),
+      range: activeParameters?.soilMoisturePercent,
+      rawValue: averages.soilMoisturePercent,
+      state: getRangeState(averages.soilMoisturePercent, activeParameters?.soilMoisturePercent),
+      value: formatMetric(averages.soilMoisturePercent, '%'),
     },
     {
-      helper: 'Ambiente',
+      helper: `Promedio · ${periodLabel}`,
       label: 'Temperatura',
-      state: getRangeState(latest?.temperatureCelsius ?? live.airTemperatureC, activeCrop?.parameters?.temperatureCelsius),
-      value: formatMetric(latest?.temperatureCelsius ?? live.airTemperatureC, ' °C'),
+      range: activeParameters?.temperatureCelsius,
+      rawValue: averages.temperatureCelsius,
+      state: getRangeState(averages.temperatureCelsius, activeParameters?.temperatureCelsius),
+      value: formatMetric(averages.temperatureCelsius, ' °C'),
     },
     {
-      helper: 'Sustrato',
+      helper: `Promedio · ${periodLabel}`,
       label: 'pH',
-      state: getRangeState(live.ph, activeCrop?.parameters?.ph),
-      value: formatMetric(live.ph, ''),
+      range: activeParameters?.ph,
+      rawValue: averages.ph,
+      state: getRangeState(averages.ph, activeParameters?.ph),
+      value: formatMetric(averages.ph, ''),
     },
     {
-      helper: 'Agua disponible',
+      helper: `Promedio · ${periodLabel}`,
       label: 'Cisterna 1',
-      state: getTankState(actuatorData.tank1DistanceCm),
-      value: formatMetric(actuatorData.tank1DistanceCm, ' cm'),
+      range: { min: 0, max: 120 },
+      rawValue: actuatorAverages.tank1DistanceCm,
+      state: getTankState(actuatorAverages.tank1DistanceCm),
+      value: formatMetric(actuatorAverages.tank1DistanceCm, ' cm'),
     },
-  ]), [activeCrop, actuatorData.tank1DistanceCm, latest, live])
+  ]), [activeParameters, actuatorAverages.tank1DistanceCm, averages, periodLabel])
 
   const kpis = [
     {
@@ -88,15 +109,15 @@ export default function DashboardPage({ auth, navigate, route }) {
     },
     {
       helper: 'Lecturas de sensores',
-      label: 'Cultivo hoy',
-      tone: cropReadings.length ? 'healthy' : 'warning',
-      value: cropReadings.length,
+      label: 'Cultivo',
+      tone: dashboardCropReadings.length ? 'healthy' : 'warning',
+      value: dashboardCropReadings.length,
     },
     {
       helper: 'Solo riego y cisternas',
-      label: 'Actuadores hoy',
-      tone: actuatorDayReadings.length ? 'healthy' : 'warning',
-      value: actuatorDayReadings.length,
+      label: 'Actuadores',
+      tone: dashboardActuatorReadings.length ? 'healthy' : 'warning',
+      value: dashboardActuatorReadings.length,
     },
     {
       helper: relayTwoOn ? 'Bomba o válvula activa' : 'Sin movimiento',
@@ -111,7 +132,7 @@ export default function DashboardPage({ auth, navigate, route }) {
       value: signal.label,
     },
     {
-      helper: activeCrop?.name ?? 'Sin cultivo elegido',
+      helper: activeStage?.name ?? 'Etapa sin definir',
       label: 'Cultivo configurado',
       tone: activeCrop ? 'healthy' : 'warning',
       value: activeCrop?.name ?? 'Pendiente',
@@ -137,8 +158,20 @@ export default function DashboardPage({ auth, navigate, route }) {
             </p>
             <div className="mt-4 flex flex-wrap gap-2 text-xs">
               <span className="module-badge green">Cultivo: {activeCrop?.name ?? 'Sin definir'}</span>
+              <span className="module-badge green">Edad: {cropAgeDays} días</span>
+              {activeStage && <span className="module-badge green">Etapa: {activeStage.name} · día {activeStageTiming.daysElapsed} de {activeStageTiming.maxDays}</span>}
               {cultivationAssignment && <span className="module-badge amber">{cultivationAssignment.greenhouse} · {cultivationAssignment.area}</span>}
             </div>
+            {activeStage && (
+              <div className="mt-3 grid gap-2 text-xs font-semibold text-[#687169] sm:grid-cols-2">
+                <p>{activeStage.from} → {activeStage.to}</p>
+                <p>Inicio del cultivo: {formatDate(activeCrop?.cropStartedAt)}</p>
+                <p>Inicio efectivo: {formatDate(activeStageTiming.effectiveStartedAt)}</p>
+                {activeStageTiming.isAutoAdvanced && (
+                  <p className="sm:col-span-2 text-[#9b6b1d]">Etapa avanzada automáticamente desde {activeStageTiming.configuredStage.name}.</p>
+                )}
+              </div>
+            )}
           </article>
 
           <article className="paper-card px-5 py-5">
@@ -156,11 +189,30 @@ export default function DashboardPage({ auth, navigate, route }) {
               <p className="text-xs font-semibold text-tlali-muted">Reloj de actualización</p>
               <p className="mt-1 text-2xl font-black tracking-tight">{clock.toLocaleTimeString('es-MX')}</p>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              <MiniSignal label="RSSI" value={formatMetric((cultivationNode ?? actuatorNode)?.radio?.rssiDbm, ' dBm')} />
-              <MiniSignal label="SNR" value={formatMetric((cultivationNode ?? actuatorNode)?.radio?.snrDb, ' dB')} />
-            </div>
+            <SignalIndicator node={cultivationNode ?? actuatorNode} />
           </article>
+        </section>
+
+        <section className="mt-4 paper-card p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="eyebrow">Filtro de análisis</p>
+              <h2 className="mt-1 text-lg font-bold">Promedios del dashboard</h2>
+              <p className="mt-1 text-sm text-tlali-muted">Las tarjetas principales se calculan con el periodo seleccionado.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {HISTORY_PERIODS.map((period) => (
+                <button
+                  className={`rounded-full border px-4 py-2 text-xs font-black transition ${historyPeriod === period.key ? 'border-tlali-jade-dark bg-[#d8eee7] text-tlali-jade-dark' : 'border-[#e1dbcd] bg-[#fcf8f0] text-[#687169]'}`}
+                  key={period.key}
+                  onClick={() => setHistoryPeriod(period.key)}
+                  type="button"
+                >
+                  {period.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -226,7 +278,7 @@ export default function DashboardPage({ auth, navigate, route }) {
           />
           <DecisionCard
             title="Historial"
-            text={`Hoy se han recibido ${cropReadings.length + actuatorDayReadings.length} registros entre cultivo y actuadores.`}
+            text={`En el periodo ${periodLabel.toLowerCase()} hay ${dashboardCropReadings.length + dashboardActuatorReadings.length} registros entre cultivo y actuadores.`}
           />
         </section>
       </div>
@@ -247,15 +299,28 @@ function DecisionKpi({ helper, label, tone, value }) {
   )
 }
 
-function RealtimeCard({ helper, label, state, value }) {
+function RealtimeCard({ helper, label, range, rawValue, state, value }) {
   const isAlert = state === 'warning' || state === 'danger'
+  const isEmpty = state === 'empty'
+  const tone = isEmpty
+    ? { border: 'border-[#ead9ad]', surface: 'bg-[#fffaf0]', text: 'text-[#a3731a]' }
+    : isAlert
+      ? { border: 'border-[#ecd8a8]', surface: 'bg-[#fffaf0]', text: 'text-[#a87518]' }
+      : { border: 'border-[#b9dcc8]', surface: 'bg-white', text: 'text-[#0f7a49]' }
+  const rangeLabel = formatRange(range)
   return (
-    <div className="relative flex min-h-[142px] flex-col justify-between overflow-hidden rounded-2xl border border-[#dfe5df] bg-white p-4 shadow-sm">
-      <span className="absolute -bottom-8 -right-8 h-20 w-20 rounded-full bg-[#dff1e9]" />
-      {isAlert && <span className={`absolute right-4 top-4 text-lg font-black leading-none ${state === 'danger' ? 'text-[#b73832]' : 'text-[#c88b23]'}`}>▲</span>}
+    <div className={`relative flex min-h-[170px] flex-col justify-between overflow-hidden rounded-2xl border p-4 shadow-sm ${tone.border} ${tone.surface}`}>
+      {(isAlert || isEmpty) && <span className={`absolute right-4 top-4 text-lg font-black leading-none ${tone.text}`}>▲</span>}
       <div>
         <p className="text-xs font-bold uppercase tracking-[0.04em] text-[#606b63]">{label}</p>
-        <p className="mt-3 text-3xl font-black tracking-tight">{value}</p>
+        <p className={`mt-3 text-3xl font-black tracking-tight ${tone.text}`}>{value}</p>
+        <div className="mt-3 rounded-xl border border-[#e5ded0] bg-white/75 px-3 py-2">
+          <div className="flex items-center justify-between gap-2 text-[11px] font-bold">
+            <span className="text-[#687169]">Rango</span>
+            <span className="text-[#344039]">{rangeLabel}</span>
+          </div>
+          <p className={`mt-1 text-xs font-black ${tone.text}`}>{getComparisonText(rawValue, range)}</p>
+        </div>
       </div>
       <p className="mt-3 text-xs font-semibold text-[#6d766e]">{helper}</p>
     </div>
@@ -271,11 +336,48 @@ function DecisionCard({ text, title }) {
   )
 }
 
-function MiniSignal({ label, value }) {
+function buildAverages(readings) {
+  return {
+    ph: average(readings, 'ph'),
+    soilMoisturePercent: average(readings, 'soilMoisturePercent'),
+    tank1DistanceCm: average(readings, 'tank1DistanceCm'),
+    temperatureCelsius: average(readings, 'temperatureCelsius'),
+  }
+}
+
+function average(readings, key) {
+  const values = readings.map((reading) => toNumber(reading?.[key])).filter((value) => value !== null)
+  if (!values.length) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function SignalIndicator({ node }) {
+  const rssi = toNumber(node?.radio?.rssiDbm)
+  const signal = getSignalDecision(node)
+  const barCount = getSignalBars(rssi)
+  const tone = {
+    danger: { active: 'bg-[#b73832]', border: 'border-[#efc7bd]', text: 'text-[#9c3029]' },
+    healthy: { active: 'bg-[#0f7a49]', border: 'border-[#b9dcc8]', text: 'text-[#0f7a49]' },
+    warning: { active: 'bg-[#d89a1d]', border: 'border-[#f0d594]', text: 'text-[#a86f11]' },
+  }[signal.tone] ?? { active: 'bg-[#d89a1d]', border: 'border-[#f0d594]', text: 'text-[#a86f11]' }
+
   return (
-    <div className="rounded-xl border border-[#e1dbcd] bg-[#fcf8f0] px-3 py-2">
-      <p className="text-[10px] font-bold uppercase text-tlali-muted">{label}</p>
-      <p className="mt-1 font-bold">{value}</p>
+    <div className={`mt-3 rounded-xl border bg-[#fcf8f0] p-3 ${tone.border}`}>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase text-tlali-muted">Señal de radio</p>
+          <p className={`mt-1 text-lg font-black ${tone.text}`}>{signal.label}</p>
+        </div>
+        <div className="flex h-10 items-end gap-1" aria-label={`Señal ${signal.label}`}>
+          {[1, 2, 3, 4].map((bar) => (
+            <span
+              className={`w-2 rounded-sm ${bar <= barCount ? tone.active : 'bg-[#ded8ca]'}`}
+              key={bar}
+              style={{ height: `${bar * 8 + 6}px` }}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -296,13 +398,48 @@ function getTankState(value) {
   return number > 120 ? 'warning' : 'healthy'
 }
 
+function formatRange(range) {
+  const min = toNumber(range?.min)
+  const max = toNumber(range?.max)
+  if (min === null || max === null) return '--'
+  return `${formatRangeNumber(min)}-${formatRangeNumber(max)}`
+}
+
+function getComparisonText(value, range) {
+  const number = toNumber(value)
+  const min = toNumber(range?.min)
+  const max = toNumber(range?.max)
+  if (number === null) return 'Sin lectura para comparar'
+  if (min === null || max === null) return 'Sin rango configurado'
+  if (number < min) return `${formatRangeNumber(min - number)} por debajo`
+  if (number > max) return `${formatRangeNumber(number - max)} por encima`
+  return 'Dentro del rango'
+}
+
+function formatRangeNumber(value) {
+  return Number(value).toLocaleString('es-MX', { maximumFractionDigits: 1 })
+}
+
+function formatDate(date) {
+  if (!date) return '-'
+  return new Date(`${date}T00:00:00`).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 function getSignalDecision(node) {
   const rssi = toNumber(node?.radio?.rssiDbm)
   if (rssi === null) return { detail: 'Sin dato de radio', label: 'Sin dato', tone: 'warning' }
-  if (rssi >= -80) return { detail: `${rssi} dBm`, label: 'Excelente', tone: 'healthy' }
-  if (rssi >= -95) return { detail: `${rssi} dBm`, label: 'Buena', tone: 'healthy' }
-  if (rssi >= -110) return { detail: `${rssi} dBm`, label: 'Débil', tone: 'warning' }
-  return { detail: `${rssi} dBm`, label: 'Crítica', tone: 'danger' }
+  if (rssi >= -80) return { detail: 'Rango excelente', label: 'Excelente', tone: 'healthy' }
+  if (rssi >= -105) return { detail: 'Rango bueno', label: 'Buena', tone: 'healthy' }
+  if (rssi >= -115) return { detail: 'Rango débil', label: 'Débil', tone: 'warning' }
+  return { detail: 'Rango crítico', label: 'Crítica', tone: 'danger' }
+}
+
+function getSignalBars(rssi) {
+  if (rssi === null) return 1
+  if (rssi >= -80) return 4
+  if (rssi >= -105) return 3
+  if (rssi >= -115) return 2
+  return 1
 }
 
 function relativeTime(date) {
