@@ -1,0 +1,68 @@
+@theme {
+  --color-tlali-cream: #f7ead4;
+  --color-tlali-paper: #fff8ea;
+  --color-tlali-ink: #142d25;
+  --color-tlali-jade: #69b8a5;
+  --color-tlali-jade-dark: #184b40;
+  --color-tlali-red: #ad302b;
+  --color-tlali-earth: #796d56;
+  --color-tlali-muted: #65736a;
+  --color-tlali-line: #dccdaf;
+  --font-display: Georgia, Cambria, "Times New Roman", serif;
+}
+
+:root {
+  --tlali-cream: #f7ead4;
+  --tlali-paper: #fff8ea;
+  --tlali-ink: #142d25;
+  --tlali-jade: #69b8a5;
+  --tlali-jade-dark: #184b40;
+  --tlali-red: #ad302b;
+  --tlali-earth: #796d56;
+  --tlali-muted: #65736a;
+  --tlali-line: #dccdaf;
+}
+
+/* Plantilla base: úsala en nuevas páginas para conservar la identidad Tlali. */
+.tlali-page {
+  background-color: var(--tlali-cream);
+  background-image:
+    radial-gradient(circle at 10% 4%, rgb(255 248 234 / 75%), transparent 30rem),
+    linear-gradient(rgb(20 45 37 / 3.5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(20 45 37 / 3.5%) 1px, transparent 1px);
+  background-size: auto, 44px 44px, 44px 44px;
+}
+
+.tlali-container {
+  @apply mx-auto w-full max-w-[1280px] px-4 sm:px-7 lg:px-10;
+}
+
+.tlali-section {
+  @apply py-16 sm:py-20 lg:py-24;
+}
+
+.tlali-card {
+  border: 1px solid var(--tlali-line);
+  border-radius: 16px;
+  background: rgb(255 248 234 / 88%);
+  box-shadow: 0 10px 26px rgb(20 45 37 / 6%);
+}
+
+.tlali-frame {
+  border: 1px solid var(--tlali-line);
+  border-radius: 28px;
+  background: rgb(255 248 234 / 85%);
+  box-shadow: 0 24px 55px rgb(20 45 37 / 16%);
+}
+
+.tlali-input {
+  @apply h-11 w-full rounded-xl border px-3 outline-none transition;
+  border-color: var(--tlali-line);
+  background: var(--tlali-paper);
+  color: var(--tlali-ink);
+}
+
+.tlali-input:focus {
+  border-color: var(--tlali-jade-dark);
+  box-shadow: 0 0 0 3px rgb(105 184 165 / 22%);
+}
