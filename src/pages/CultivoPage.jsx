@@ -1,9 +1,11 @@
 ﻿import {
   CultivationCard,
+  DailyTrendCharts,
   DashboardNav,
   RecentActivity,
 } from '../components/dashboard/DashboardWidgets.jsx'
 import useDashboardData from '../hooks/useDashboardData.js'
+import { getCropParameters } from '../lib/cropSettings.js'
 
 export default function CultivoPage({ auth, navigate, route }) {
   const {
@@ -37,7 +39,11 @@ export default function CultivoPage({ auth, navigate, route }) {
         )}
 
         <section className="mt-4">
-          <CultivationCard cropParameters={activeCrop?.parameters} firebaseNode={cultivationNode} fullWidth latest={latest} readings={registrosDelDia} />
+          <CultivationCard cropParameters={getCropParameters(activeCrop)} firebaseNode={cultivationNode} fullWidth latest={latest} readings={registrosDelDia} />
+        </section>
+
+        <section className="mt-4">
+          <DailyTrendCharts readings={registrosDelDia} />
         </section>
 
         <section className="mt-4">

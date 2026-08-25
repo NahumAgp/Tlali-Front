@@ -3,6 +3,7 @@ import { TOKEN_KEY } from './config/app.js'
 import { useLanguage } from './i18n/LanguageContext.jsx'
 import { getTokenExpirationDelay, isTokenExpired, loadCurrentUser } from './lib/auth.js'
 import ActuadoresPage from './pages/ActuadoresPage.jsx'
+import AIAgentPage from './pages/AIAgentPage.jsx'
 import ConfiguracionPage from './pages/ConfiguracionPage.jsx'
 import CultivoPage from './pages/CultivoPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
@@ -11,8 +12,8 @@ import LoginPage from './pages/LoginPage.jsx'
 import WhoWeArePage from './pages/WhoWeArePage.jsx'
 
 const DEFAULT_LOGIN_MESSAGE = ''
-const PRIVATE_ROUTES = ['/dashboard', '/cultivo', '/actuadores', '/configuracion']
-const PUBLIC_ROUTES = ['/', '/quienes-somos', '/login', '/dashboard', '/cultivo', '/actuadores', '/configuracion', '/auth/callback']
+const PRIVATE_ROUTES = ['/dashboard', '/cultivo', '/actuadores', '/agente', '/configuracion']
+const PUBLIC_ROUTES = ['/', '/quienes-somos', '/login', '/dashboard', '/cultivo', '/actuadores', '/agente', '/configuracion', '/auth/callback']
 
 export default function App() {
   const { t } = useLanguage()
@@ -105,6 +106,7 @@ export default function App() {
       {route === '/dashboard' && token && <DashboardPage auth={auth} navigate={navigate} route={route} />}
       {route === '/cultivo' && token && <CultivoPage auth={auth} navigate={navigate} route={route} />}
       {route === '/actuadores' && token && <ActuadoresPage auth={auth} navigate={navigate} route={route} />}
+      {route === '/agente' && token && <AIAgentPage auth={auth} navigate={navigate} route={route} />}
       {route === '/configuracion' && token && <ConfiguracionPage auth={auth} navigate={navigate} route={route} />}
       {route === '/auth/callback' && <LoadingPage />}
       {!PUBLIC_ROUTES.includes(route) && <NotFoundPage navigate={navigate} />}

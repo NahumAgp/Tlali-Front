@@ -44,6 +44,7 @@ export function DashboardNav({ auth, downloadReport, hasReadings, navigate, rout
     { label: LABELS.dashboard, path: '/dashboard' },
     { label: LABELS.crop, path: '/cultivo' },
     { label: 'Actuadores', path: '/actuadores' },
+    { label: 'Agente IA', path: '/agente' },
     ...(isAdmin ? [{ label: 'Configuración', path: '/configuracion' }] : []),
   ]
 
@@ -224,6 +225,9 @@ function SoilDetailsWide({ cropParameters, latest, live }) {
                 helper={card.helper}
                 key={card.key}
                 label={card.label}
+                range={cropParameters?.[card.key]}
+                rangeUnit={card.suffix}
+                rawValue={card.value}
                 state={getConfiguredState(card.value, cropParameters?.[card.key])}
                 value={card.compact ? `${compactNumber(card.value)}${card.suffix}` : formatMetric(card.value, card.suffix)}
               />
@@ -235,31 +239,87 @@ function SoilDetailsWide({ cropParameters, latest, live }) {
   )
 }
 
-function SensorStatusCard({ helper, label, state, value }) {
+function SensorStatusCard({ helper, label, range, rangeUnit = '', rawValue, state, value }) {
   const isAlert = state === 'warning' || state === 'danger'
+  const isEmpty = state === 'empty'
+  const comparison = getRangeComparison(rawValue, range, rangeUnit)
   const status = {
-    danger: { dot: 'bg-[#8f9690]', icon: '▲', iconClass: 'text-[#b73832]', label: 'Revisar rango' },
-    empty: { dot: 'bg-[#a8aaa5]', icon: '', iconClass: '', label: 'Sin lectura' },
-    healthy: { dot: 'bg-[#0f7a49]', icon: '', iconClass: '', label: 'Lectura válida' },
-    warning: { dot: 'bg-[#8f9690]', icon: '▲', iconClass: 'text-[#c88b23]', label: 'Revisar rango' },
-  }[state] ?? { dot: 'bg-[#0f7a49]', icon: '', iconClass: '', label: 'Lectura válida' }
+    danger: {
+      bar: 'bg-[#b9694f]',
+      border: 'border-[#e8c9bc]',
+      dot: 'bg-[#b9694f]',
+      icon: '▲',
+      iconClass: 'text-[#b9694f]',
+      label: 'Revisar rango',
+      surface: 'bg-[#fff7f2]',
+      text: 'text-[#a6533b]',
+    },
+    empty: {
+      bar: 'bg-[#d6a23a]',
+      border: 'border-[#ead9ad]',
+      dot: 'bg-[#d6a23a]',
+      icon: '▲',
+      iconClass: 'text-[#b98922]',
+      label: 'Sin lectura',
+      surface: 'bg-[#fffaf0]',
+      text: 'text-[#a3731a]',
+    },
+    healthy: {
+      bar: 'bg-[#0f7a49]',
+      border: 'border-[#b9dcc8]',
+      dot: 'bg-[#0f7a49]',
+      icon: '',
+      iconClass: '',
+      label: 'Dentro del rango',
+      surface: 'bg-white',
+      text: 'text-[#0f7a49]',
+    },
+    warning: {
+      bar: 'bg-[#c7922b]',
+      border: 'border-[#ecd8a8]',
+      dot: 'bg-[#c7922b]',
+      icon: '▲',
+      iconClass: 'text-[#c7922b]',
+      label: 'Revisar rango',
+      surface: 'bg-[#fffaf0]',
+      text: 'text-[#a87518]',
+    },
+  }[state] ?? {
+    bar: 'bg-[#0f7a49]',
+    border: 'border-[#b9dcc8]',
+    dot: 'bg-[#0f7a49]',
+    icon: '',
+    iconClass: '',
+    label: 'Dentro del rango',
+    surface: 'bg-white',
+    text: 'text-[#0f7a49]',
+  }
 
   return (
-    <div className="relative flex min-h-[144px] overflow-hidden rounded-2xl border border-[#dfe5df] bg-white p-5 shadow-sm">
-      <span className="absolute -bottom-8 -right-8 h-24 w-24 rounded-full bg-[#dff1e9]" />
-      {isAlert && (
-        <span className={`absolute right-4 top-4 text-xl font-black leading-none ${status.iconClass}`} title="Este sensor está fuera del rango configurado">
+    <div className={`relative flex min-h-[184px] overflow-hidden rounded-2xl border p-5 shadow-sm ${status.border} ${status.surface}`}>
+      {(isAlert || isEmpty) && (
+        <span className={`absolute right-4 top-4 text-xl font-black leading-none ${status.iconClass}`} title={isEmpty ? 'Este sensor no tiene lectura disponible' : 'Este sensor está fuera del rango configurado'}>
           {status.icon}
         </span>
       )}
       <div className="relative z-10 flex min-w-0 flex-col justify-between">
         <div>
           <p className="pr-8 text-sm font-black text-[#33544a]">{label}</p>
-          <p className="mt-4 text-3xl font-black tracking-tight text-tlali-ink">{value}</p>
+          <p className={`mt-4 text-3xl font-black tracking-tight ${status.text}`}>{value}</p>
+          <div className="mt-3 rounded-xl border border-[#e5ded0] bg-white/75 px-3 py-2">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-bold">
+              <span className="text-[#687169]">Rango objetivo</span>
+              <span className="text-[#344039]">{comparison.rangeLabel}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#e9e3d7]">
+              <span className={`block h-full rounded-full ${status.bar}`} style={{ width: `${comparison.percent}%` }} />
+            </div>
+            <p className={`mt-2 text-xs font-black ${status.text}`}>{comparison.percentLabel}</p>
+          </div>
         </div>
         <div className="mt-4 flex items-center gap-2 text-xs font-black">
           <span className={`h-2 w-2 rounded-full ${status.dot}`} />
-          <span className={isAlert ? 'text-[#687169]' : 'text-[#0f7a49]'}>{status.label}</span>
+          <span className={status.text}>{status.label}</span>
           <span className="font-semibold text-tlali-muted">· {helper}</span>
         </div>
       </div>
@@ -339,17 +399,17 @@ function ActuatorDetails({ fullWidth = false, node }) {
     },
     {
       cards: [
-        { helper: 'Distancia al agua', label: LABELS.tankOne, state: getActuatorRangeState(tankOne, 0, 120), value: formatMetric(tankOne, ' cm') },
-        { helper: 'Distancia al agua', label: LABELS.tankTwo, state: getActuatorRangeState(tankTwo, 0, 120), value: formatMetric(tankTwo, ' cm') },
+        { helper: 'Distancia al agua', label: LABELS.tankOne, range: { min: 0, max: 120 }, rangeUnit: ' cm', rawValue: tankOne, state: getActuatorRangeState(tankOne, 0, 120), value: formatMetric(tankOne, ' cm') },
+        { helper: 'Distancia al agua', label: LABELS.tankTwo, range: { min: 0, max: 120 }, rangeUnit: ' cm', rawValue: tankTwo, state: getActuatorRangeState(tankTwo, 0, 120), value: formatMetric(tankTwo, ' cm') },
       ],
       title: 'Cisternas',
     },
     {
       cards: [
-        { helper: 'Agua', label: 'pH del agua', state: getActuatorRangeState(ph, 5.5, 7.5), value: formatMetric(ph, ' pH') },
-        { helper: 'Solución nutritiva', label: 'TDS', state: getActuatorRangeState(tds, 0, 1200), value: formatMetric(tds, ' ppm') },
-        { helper: 'Solución nutritiva', label: 'Conductividad', state: getActuatorRangeState(conductivity, 0, 2400), value: formatMetric(conductivity, ' µS/cm') },
-        { helper: 'Agua', label: 'Temperatura del agua', state: getActuatorRangeState(waterTemperature, 10, 35), value: formatMetric(waterTemperature, ' °C') },
+        { helper: 'Agua', label: 'pH del agua', range: { min: 5.5, max: 7.5 }, rangeUnit: ' pH', rawValue: ph, state: getActuatorRangeState(ph, 5.5, 7.5), value: formatMetric(ph, ' pH') },
+        { helper: 'Solución nutritiva', label: 'TDS', range: { min: 0, max: 1200 }, rangeUnit: ' ppm', rawValue: tds, state: getActuatorRangeState(tds, 0, 1200), value: formatMetric(tds, ' ppm') },
+        { helper: 'Solución nutritiva', label: 'Conductividad', range: { min: 0, max: 2400 }, rangeUnit: ' µS/cm', rawValue: conductivity, state: getActuatorRangeState(conductivity, 0, 2400), value: formatMetric(conductivity, ' µS/cm') },
+        { helper: 'Agua', label: 'Temperatura del agua', range: { min: 10, max: 35 }, rangeUnit: ' °C', rawValue: waterTemperature, state: getActuatorRangeState(waterTemperature, 10, 35), value: formatMetric(waterTemperature, ' °C') },
       ],
       title: 'Agua y nutrientes',
     },
@@ -370,6 +430,9 @@ function ActuatorDetails({ fullWidth = false, node }) {
                   helper={card.helper}
                   key={card.label}
                   label={card.label}
+                  range={card.range}
+                  rangeUnit={card.rangeUnit}
+                  rawValue={card.rawValue}
                   state={card.state}
                   value={card.value}
                 />
@@ -562,6 +625,117 @@ export function RecentActivity({ readings, type = 'cultivo' }) {
   )
 }
 
+export function DailyTrendCharts({ readings }) {
+  const orderedReadings = getDailyChartReadings(readings)
+  const countLabel = `${orderedReadings.length} ${orderedReadings.length === 1 ? 'registro' : 'registros'} de hoy`
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TrendChart
+          eyebrow="Humedad"
+          emptyText="Cuando existan lecturas de humedad se dibujará la curva completa del día."
+          readings={orderedReadings}
+          series={[
+            { color: '#0f7a49', key: 'soilMoisturePercent', label: 'Suelo' },
+            { color: '#0b6680', key: 'humidityPercent', label: 'Ambiente' },
+          ]}
+          subtitle={countLabel}
+          title="Suelo y ambiente"
+          unit="%"
+          yMax={100}
+          yMin={0}
+        />
+        <TrendChart
+          eyebrow="Temperatura"
+          emptyText="Cuando existan lecturas de temperatura se dibujará la curva completa del día."
+          readings={orderedReadings}
+          series={[
+            { color: '#d36a00', key: 'soilTemperatureC', label: 'Suelo' },
+            { color: '#d5413d', key: 'temperatureCelsius', label: 'Ambiente' },
+          ]}
+          subtitle={countLabel}
+          title="Suelo y ambiente"
+          unit="°C"
+        />
+      </div>
+      <TrendChart
+        eyebrow="Nutrientes del sustrato"
+        emptyText="Cuando existan lecturas de NPK se dibujará la curva completa del día."
+        readings={orderedReadings}
+        series={[
+          { color: '#0f8a64', key: 'nitrogenMgKg', label: 'Nitrógeno' },
+          { color: '#d8951b', key: 'phosphorusMgKg', label: 'Fósforo' },
+          { color: '#6c4ab6', key: 'potassiumMgKg', label: 'Potasio' },
+        ]}
+        subtitle={countLabel}
+        title="Nitrógeno, fósforo y potasio"
+        unit="mg/kg"
+      />
+    </div>
+  )
+}
+
+function TrendChart({ emptyText, eyebrow, readings, series, subtitle, title, unit, yMax, yMin }) {
+  const chart = buildTrendChart(readings, series, { yMax, yMin })
+
+  return (
+    <article className="paper-card bg-white/90 px-4 py-4 sm:px-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="eyebrow text-tlali-jade-dark">{eyebrow}</p>
+          <h2 className="mt-1 text-lg font-bold">{title}</h2>
+        </div>
+        <span className="module-badge green">{subtitle}</span>
+      </div>
+      {chart.hasData ? (
+        <>
+          <div className="mt-4">
+            <svg aria-label={`${eyebrow}: ${title}`} className="h-[260px] w-full" preserveAspectRatio="none" viewBox="0 0 760 260">
+              <g>
+                {chart.yTicks.map((tick) => (
+                  <g key={tick.value}>
+                    <line stroke="#e7e2d8" strokeWidth="1" x1="54" x2="742" y1={tick.y} y2={tick.y} />
+                    <text fill="#607069" fontSize="11" fontWeight="700" textAnchor="end" x="45" y={tick.y + 4}>{formatAxisNumber(tick.value)}</text>
+                  </g>
+                ))}
+                {chart.xTicks.map((tick) => (
+                  <g key={tick.label}>
+                    <line stroke="#f0ebe2" strokeWidth="1" x1={tick.x} x2={tick.x} y1="34" y2="212" />
+                    <text fill="#607069" fontSize="11" fontWeight="700" textAnchor="middle" x={tick.x} y="238">{tick.label}</text>
+                  </g>
+                ))}
+                <line stroke="#d8d0c2" strokeWidth="1.4" x1="54" x2="742" y1="212" y2="212" />
+                <text fill="#607069" fontSize="11" fontWeight="800" textAnchor="middle" transform="rotate(-90 16 123)" x="16" y="123">{unit}</text>
+                {chart.series.map((line) => (
+                  <g key={line.label}>
+                    <polyline fill="none" points={line.points} stroke={line.color} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" />
+                    {line.markers.map((marker) => (
+                      <circle cx={marker.x} cy={marker.y} fill="#fffdf8" key={`${line.label}-${marker.x}-${marker.y}`} r="3.5" stroke={line.color} strokeWidth="1.8">
+                        <title>{`${marker.time} · ${line.label}: ${formatMetric(marker.value, getUnitSuffix(unit))}`}</title>
+                      </circle>
+                    ))}
+                  </g>
+                ))}
+              </g>
+            </svg>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            {series.map((item) => (
+              <span className="inline-flex items-center gap-2 text-xs font-semibold text-[#56635c]" key={item.key}>
+                <span className="h-3 w-3 rounded-full border-2 bg-white" style={{ borderColor: item.color }} />
+                {item.label}
+              </span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="mt-4 rounded-xl border border-[#e1dbcd] bg-[#fcf8f0] p-4 text-sm text-tlali-muted">{emptyText}</div>
+      )}
+    </article>
+  )
+}
+
 export function ReadingForm({ form, handleSubmit, message, updateField }) {
   return (
     <form className="tlali-card p-4 shadow-sm" onSubmit={handleSubmit}>
@@ -584,6 +758,109 @@ export function ReadingForm({ form, handleSubmit, message, updateField }) {
 export function getNextView(view) {
   const current = VIEW_ORDER.indexOf(view)
   return VIEW_ORDER[(current + 1) % VIEW_ORDER.length]
+}
+
+function getDailyChartReadings(readings) {
+  return readings
+    .filter((reading) => reading?.receivedAt)
+    .sort((left, right) => new Date(left.receivedAt).getTime() - new Date(right.receivedAt).getTime())
+}
+
+function buildTrendChart(readings, series, options = {}) {
+  const left = 54
+  const right = 742
+  const top = 34
+  const bottom = 212
+  const validTimes = readings.map((reading) => new Date(reading.receivedAt).getTime()).filter((time) => Number.isFinite(time)).sort((leftTime, rightTime) => leftTime - rightTime)
+  const firstTime = validTimes[0] ?? Date.now()
+  const lastTime = validTimes[validTimes.length - 1] ?? firstTime
+  const rawTimeSpan = Math.max(15 * 60 * 1000, lastTime - firstTime)
+  const timePadding = rawTimeSpan * 0.05
+  const minTime = firstTime - timePadding
+  const maxTime = lastTime + timePadding
+
+  const values = series.flatMap((item) => readings.map((reading) => toNumber(reading[item.key])).filter((value) => value !== null))
+  if (!values.length) {
+    return { hasData: false, series: [], xTicks: [], yTicks: [] }
+  }
+
+  const actualMin = Math.min(...values)
+  const actualMax = Math.max(...values)
+  const rangePadding = actualMin === actualMax ? Math.max(1, Math.abs(actualMin) * 0.2) : (actualMax - actualMin) * 0.12
+  const yMin = options.yMin ?? Math.max(0, actualMin - rangePadding)
+  const yMax = options.yMax ?? (actualMax + rangePadding)
+  const safeYMax = yMax === yMin ? yMax + 1 : yMax
+  const ySpan = safeYMax - yMin
+  const timeSpan = maxTime - minTime || 1
+  const xForTime = (time) => left + ((time - minTime) / timeSpan) * (right - left)
+  const yForValue = (value) => bottom - ((value - yMin) / ySpan) * (bottom - top)
+  const yTicks = Array.from({ length: 5 }, (_, index) => {
+    const value = yMin + (ySpan / 4) * index
+    return { value, y: yForValue(value) }
+  }).reverse()
+  const xTicks = Array.from({ length: 5 }, (_, index) => {
+    const time = minTime + (timeSpan / 4) * index
+    const date = new Date(time)
+    return {
+      label: date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+      x: xForTime(time),
+    }
+  })
+
+  const chartSeries = series
+    .map((item) => {
+      const rawPoints = readings
+        .map((reading) => {
+          const value = toNumber(reading[item.key])
+          const time = new Date(reading.receivedAt).getTime()
+          if (value === null || !Number.isFinite(time)) return null
+          return {
+            time,
+            timeLabel: new Date(reading.receivedAt).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+            value,
+            x: xForTime(time),
+            y: yForValue(value),
+          }
+        })
+        .filter(Boolean)
+      const points = sampleChartPoints(rawPoints, 320)
+      const markers = rawPoints.length <= 12 ? rawPoints.map((point) => ({
+        time: point.timeLabel,
+        value: point.value,
+        x: point.x,
+        y: point.y,
+      })) : []
+
+      return {
+        color: item.color,
+        label: item.label,
+        markers,
+        points: points.map((point) => `${point.x},${point.y}`).join(' '),
+      }
+    })
+    .filter((item) => item.points)
+
+  return {
+    hasData: chartSeries.length > 0,
+    series: chartSeries,
+    xTicks,
+    yTicks,
+  }
+}
+
+function sampleChartPoints(points, maxPoints) {
+  if (points.length <= maxPoints) return points
+  const step = Math.ceil(points.length / maxPoints)
+  return points.filter((_, index) => index % step === 0 || index === points.length - 1)
+}
+
+function formatAxisNumber(value) {
+  return Number(value).toLocaleString('es-MX', { maximumFractionDigits: Math.abs(value) < 10 ? 1 : 0 })
+}
+
+function getUnitSuffix(unit) {
+  if (!unit) return ''
+  return unit === '%' ? '%' : ` ${unit}`
 }
 
 function getViewTitle(view) {
@@ -647,6 +924,50 @@ function getConfiguredState(value, range) {
   if (number < min) return 'warning'
   if (number > max) return 'danger'
   return 'healthy'
+}
+
+function getRangeComparison(value, range, unit = '') {
+  const number = toNumber(value)
+  const min = toNumber(range?.min)
+  const max = toNumber(range?.max)
+  if (min === null || max === null) {
+    return {
+      percent: number === null ? 0 : 100,
+      percentLabel: 'Sin rango configurado',
+      rangeLabel: '--',
+    }
+  }
+  if (number === null) {
+    return {
+      percent: 0,
+      percentLabel: 'Sin lectura para comparar',
+      rangeLabel: `${formatRangeNumber(min)}-${formatRangeNumber(max)}${unit}`,
+    }
+  }
+  const percent = Math.min(100, Math.max(0, ((number - min) / (max - min)) * 100))
+  if (number < min) {
+    return {
+      percent: 8,
+      percentLabel: `${formatRangeNumber(min - number)}${unit} por debajo`,
+      rangeLabel: `${formatRangeNumber(min)}-${formatRangeNumber(max)}${unit}`,
+    }
+  }
+  if (number > max) {
+    return {
+      percent: 100,
+      percentLabel: `${formatRangeNumber(number - max)}${unit} por encima`,
+      rangeLabel: `${formatRangeNumber(min)}-${formatRangeNumber(max)}${unit}`,
+    }
+  }
+  return {
+    percent: Math.max(12, percent),
+    percentLabel: `${Math.round(percent)}% dentro del rango`,
+    rangeLabel: `${formatRangeNumber(min)}-${formatRangeNumber(max)}${unit}`,
+  }
+}
+
+function formatRangeNumber(value) {
+  return Number(value).toLocaleString('es-MX', { maximumFractionDigits: 1 })
 }
 
 function relativeTime(date) {
