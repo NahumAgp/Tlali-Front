@@ -162,6 +162,198 @@ section[id] {
   color: #8c332f;
 }
 
+.chat-composer {
+  background: #fff7e8;
+  border-top: 1px solid #e1dbcd;
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.composer-topline {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.language-switch {
+  background: #fffdf8;
+  border: 1px solid #d8cfbf;
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.22rem;
+}
+
+.language-switch button {
+  border-radius: 999px;
+  color: #516158;
+  font-size: 0.76rem;
+  font-weight: 900;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.85rem;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.language-switch button.active {
+  background: var(--tlali-jade-dark);
+  color: white;
+}
+
+.composer-status {
+  color: var(--tlali-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  margin: 0;
+  text-align: right;
+}
+
+.composer-row {
+  align-items: end;
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: minmax(0, 1fr) 2.9rem 2.9rem;
+}
+
+.composer-input {
+  background: #fffdf8;
+  border: 1px solid #d8cfbf;
+  border-radius: 1.45rem;
+  color: var(--tlali-ink);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  max-height: 7.5rem;
+  min-height: 2.9rem;
+  outline: none;
+  overflow: auto;
+  padding: 0.72rem 1rem;
+  resize: none;
+  transition: border 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.composer-input:focus {
+  border-color: var(--tlali-jade-dark);
+  box-shadow: 0 0 0 3px rgb(105 184 165 / 0.22);
+}
+
+.composer-input:disabled {
+  background: #f9efe0;
+}
+
+.composer-mic,
+.composer-send {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  height: 2.9rem;
+  justify-content: center;
+  transition: transform 140ms ease, background 140ms ease, color 140ms ease, border 140ms ease;
+  width: 2.9rem;
+}
+
+.composer-mic {
+  background: #fffdf8;
+  border: 1px solid #d8cfbf;
+  color: var(--tlali-jade-dark);
+}
+
+.composer-mic.active {
+  background: #9b231e;
+  border-color: #9b231e;
+  color: white;
+  box-shadow: 0 0 0 6px rgb(155 35 30 / 0.12);
+}
+
+.composer-send {
+  background: var(--tlali-jade-dark);
+  border: 1px solid var(--tlali-jade-dark);
+  color: white;
+  box-shadow: 0 4px 10px rgb(24 75 64 / 0.18);
+}
+
+.composer-mic:not(:disabled):hover,
+.composer-send:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.composer-icon {
+  height: 1.25rem;
+  width: 1.25rem;
+}
+
+.send-spinner {
+  animation: spin 760ms linear infinite;
+  border: 2px solid rgb(255 255 255 / 0.45);
+  border-top-color: white;
+  border-radius: 999px;
+  height: 1.15rem;
+  width: 1.15rem;
+}
+
+.voice-meter {
+  align-items: center;
+  background: #103f35;
+  border-radius: 1.3rem;
+  color: white;
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 4.6rem;
+  padding: 0.8rem 1rem;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+.voice-dot {
+  animation: pulse 1s ease-in-out infinite;
+  background: #f3cf7a;
+  border-radius: 999px;
+  height: 0.72rem;
+  width: 0.72rem;
+}
+
+.voice-wave {
+  align-items: center;
+  display: flex;
+  gap: 0.22rem;
+  height: 3rem;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.voice-wave i {
+  background: linear-gradient(180deg, #f4d486, #cce8df);
+  border-radius: 999px;
+  display: block;
+  min-height: 0.6rem;
+  transition: height 80ms ease;
+  width: 0.25rem;
+}
+
+.voice-meter strong {
+  color: #f7ecd7;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 table th,
 table td {
   padding: 0.75rem 1rem;
@@ -175,5 +367,32 @@ table td {
   .primary-button,
   .secondary-button {
     padding-inline: 0.65rem;
+  }
+
+  .composer-topline {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .composer-status {
+    text-align: left;
+  }
+
+  .composer-row {
+    grid-template-columns: minmax(0, 1fr) 2.7rem 2.7rem;
+  }
+
+  .composer-mic,
+  .composer-send {
+    height: 2.7rem;
+    width: 2.7rem;
+  }
+
+  .voice-meter {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .voice-meter strong {
+    grid-column: 1 / -1;
   }
 }

@@ -10,6 +10,8 @@ export default function ActuadoresPage({ auth, navigate, route }) {
     actuatorNode,
     actuatorReadings,
     downloadReport,
+    ghostPump,
+    ghostWater,
     lastReceivedAt,
     liveSource,
     message,
@@ -37,7 +39,7 @@ export default function ActuadoresPage({ auth, navigate, route }) {
         )}
 
         <section className="mt-4">
-          <ActuatorCard fullWidth node={actuatorNode} />
+          <ActuatorCard fullWidth ghostPump={ghostPump} ghostWater={ghostWater} node={actuatorNode} />
         </section>
 
         <section className="mt-4">

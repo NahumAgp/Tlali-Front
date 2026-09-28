@@ -35,8 +35,8 @@ La app incluye:
 Usuario inicial de desarrollo:
 
 ```text
-Correo: superadmin@tlali.local
-Password: SuperAdmin123!
+Correo: nahum.aguilar.per@gmail.com
+Password: Admin123!
 ```
 
 ## Build

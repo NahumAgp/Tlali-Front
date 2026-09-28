@@ -1,6 +1,10 @@
+import { API_URL } from '../config/app.js'
+import { authorizedFetch } from './auth.js'
+
 export const CROP_SETTINGS_KEY = 'tlali_crop_settings'
 export const ACTIVE_CROP_KEY = 'tlali_active_crop_id'
 export const NODE_ASSIGNMENTS_KEY = 'tlali_node_assignments'
+export const CROP_CONFIGURATION_KEY = 'tlali_crop_configuration'
 
 export const SENSOR_PARAMETERS = [
   { key: 'soilMoisturePercent', label: 'Humedad capacitiva', unit: '%', min: 25, max: 85, source: 'Video Agrocejo: 60-80% H.A.; tolerancia operativa nocturna ampliada para sensores capacitivos.' },
@@ -146,6 +150,9 @@ export const DEFAULT_NODE_ASSIGNMENTS = [
   {
     node: 'tlali-npk-01',
     cropId: 'jitomate',
+    activeStageId: 'fructificacion',
+    activeStageStartedAt: todayLocalDate(),
+    cropStartedAt: todayLocalDate(),
     greenhouse: 'Invernadero 1',
     area: 'Zona de cultivo',
   },
@@ -240,6 +247,47 @@ export function saveNodeAssignments(assignments) {
   return cleanAssignments
 }
 
+export function loadCropConfiguration() {
+  const crops = loadCropSettings()
+  return normalizeCropConfiguration({
+    activeCropId: loadActiveCropId(),
+    crops,
+    nodeAssignments: loadNodeAssignments(),
+  })
+}
+
+export function saveCropConfiguration(configuration) {
+  const cleanConfiguration = normalizeCropConfiguration(configuration)
+  window.localStorage.setItem(CROP_CONFIGURATION_KEY, JSON.stringify(cleanConfiguration))
+  window.localStorage.setItem(CROP_SETTINGS_KEY, JSON.stringify(cleanConfiguration.crops))
+  window.localStorage.setItem(ACTIVE_CROP_KEY, cleanConfiguration.activeCropId)
+  window.localStorage.setItem(NODE_ASSIGNMENTS_KEY, JSON.stringify(cleanConfiguration.nodeAssignments))
+  window.dispatchEvent(new Event('tlali-crop-settings-change'))
+  return cleanConfiguration
+}
+
+export async function loadRemoteCropConfiguration(auth) {
+  const response = await authorizedFetch(`${API_URL}/api/v1/firebase/configuration`, auth.token, {}, auth.onUnauthorized)
+  if (!response.ok) throw new Error('No se pudo leer la configuración de Firebase')
+  const remoteConfiguration = await response.json()
+  if (!remoteConfiguration?.crops?.length) {
+    return saveRemoteCropConfiguration(auth, loadCropConfiguration())
+  }
+  return saveCropConfiguration(remoteConfiguration)
+}
+
+export async function saveRemoteCropConfiguration(auth, configuration) {
+  const cleanConfiguration = normalizeCropConfiguration(configuration)
+  const response = await authorizedFetch(`${API_URL}/api/v1/firebase/configuration`, auth.token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cleanConfiguration),
+  }, auth.onUnauthorized)
+  if (!response.ok) throw new Error('No se pudo guardar la configuración en Firebase')
+  const savedConfiguration = await response.json()
+  return saveCropConfiguration(savedConfiguration)
+}
+
 export function getAssignmentForNode(nodeName, assignments = loadNodeAssignments()) {
   if (!nodeName) return null
   return assignments.find((assignment) => sameNode(assignment.node, nodeName)) ?? null
@@ -247,7 +295,21 @@ export function getAssignmentForNode(nodeName, assignments = loadNodeAssignments
 
 export function getCropForNode(nodeName, crops = loadCropSettings(), assignments = loadNodeAssignments()) {
   const assignment = getAssignmentForNode(nodeName, assignments)
-  return crops.find((crop) => crop.id === assignment?.cropId) ?? null
+  const crop = crops.find((item) => item.id === assignment?.cropId) ?? null
+  return mergeCropWithAssignment(crop, assignment)
+}
+
+export function mergeCropWithAssignment(crop, assignment) {
+  if (!crop) return null
+  const activeStageId = crop.stages?.some((stage) => stage.id === assignment?.activeStageId)
+    ? assignment.activeStageId
+    : crop.activeStageId
+  return normalizeCrop({
+    ...crop,
+    activeStageId,
+    activeStageStartedAt: assignment?.activeStageStartedAt || crop.activeStageStartedAt,
+    cropStartedAt: assignment?.cropStartedAt || crop.cropStartedAt,
+  })
 }
 
 export function createCropFromName(name) {
@@ -268,12 +330,54 @@ export function createCropFromName(name) {
   }
 }
 
+export function createStageFromName(name) {
+  const cleanName = name.trim()
+  const id = `${cleanName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`
+  return {
+    id,
+    name: cleanName,
+    from: 'Inicio de etapa',
+    to: 'Siguiente etapa',
+    durationDays: '1-30',
+    description: 'Nueva etapa configurada por el administrador.',
+    guidance: 'Agrega aquí los cuidados recomendados para esta etapa.',
+    parameters: defaultParameterMap(),
+  }
+}
+
+export function isDefaultTomatoStage(stageId) {
+  return TOMATO_STAGE_TEMPLATES.some((stage) => stage.id === stageId)
+}
+
+function normalizeCropConfiguration(configuration = {}) {
+  const crops = Array.isArray(configuration.crops) && configuration.crops.length
+    ? configuration.crops.filter((crop) => crop.id !== 'lechuga').map(normalizeCrop)
+    : DEFAULT_CROPS.map(normalizeCrop)
+  const activeCropId = crops.some((crop) => crop.id === configuration.activeCropId)
+    ? configuration.activeCropId
+    : crops[0]?.id ?? DEFAULT_CROPS[0].id
+  return {
+    schemaVersion: 1,
+    activeCropId,
+    crops,
+    nodeAssignments: normalizeAssignments(configuration.nodeAssignments ?? DEFAULT_NODE_ASSIGNMENTS),
+    updatedAt: configuration.updatedAt ?? null,
+  }
+}
+
 function normalizeCrop(crop) {
-  const baseStages = crop?.id === 'jitomate' || !Array.isArray(crop?.stages) || !crop.stages.length
-    ? TOMATO_STAGE_TEMPLATES
-    : crop.stages
+  const baseStages = Array.isArray(crop?.stages) && crop.stages.length
+    ? crop.stages
+    : TOMATO_STAGE_TEMPLATES
   const stages = baseStages.map((stage) => ({
     ...stage,
+    id: stage.id || `${String(stage.name ?? 'etapa').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`,
+    name: stage.name || 'Etapa',
+    from: stage.from || 'Inicio',
+    to: stage.to || 'Fin',
+    durationDays: stage.durationDays || '1-30',
+    description: stage.description || 'Etapa configurada para monitoreo del cultivo.',
+    guidance: stage.guidance || '',
     parameters: normalizeParameterMap(stage.parameters),
   }))
   const activeStageId = stages.some((stage) => stage.id === crop?.activeStageId)
@@ -352,6 +456,9 @@ function normalizeAssignments(assignments) {
       byNode.set(cleanNode.toLowerCase(), {
         node: cleanNode,
         cropId: assignment.cropId === 'lechuga' ? DEFAULT_CROPS[0].id : assignment.cropId || DEFAULT_CROPS[0].id,
+        activeStageId: assignment.activeStageId || null,
+        activeStageStartedAt: assignment.activeStageStartedAt || null,
+        cropStartedAt: assignment.cropStartedAt || null,
         greenhouse: assignment.greenhouse?.trim() || 'Invernadero 1',
         area: assignment.area?.trim() || 'Zona de cultivo',
       })

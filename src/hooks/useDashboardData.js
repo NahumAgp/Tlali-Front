@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API_URL, initialReadingForm } from '../config/app.js'
 import { authorizedFetch } from '../lib/auth.js'
-import { getActiveCrop, getAssignmentForNode, getCropForNode, getCropParameters, loadCropSettings, loadNodeAssignments } from '../lib/cropSettings.js'
+import { getActiveCrop, getAssignmentForNode, getCropForNode, getCropParameters, loadCropConfiguration, loadCropSettings, loadNodeAssignments, loadRemoteCropConfiguration } from '../lib/cropSettings.js'
+import { getGhostWaterForNode, loadGhostWaterLedger, updateGhostWaterLedger } from '../lib/ghostWater.js'
 import { toReadingPayload } from '../lib/readings.js'
-import { buildSensorMetrics } from '../lib/sensors.js'
+import { buildSensorMetrics, toNumber } from '../lib/sensors.js'
 
 const DAILY_CACHE_KEY = 'tlali-dashboard-readings'
 const ACTUATOR_DAILY_CACHE_KEY = 'tlali-actuator-readings'
@@ -19,6 +20,7 @@ export const HISTORY_PERIODS = [
 
 export default function useDashboardData(auth, options = {}) {
   const historyPeriod = options.historyPeriod ?? 'day'
+  const selectedGreenhouse = options.greenhouse ?? ''
   const [summary, setSummary] = useState(null)
   const [firebaseData, setFirebaseData] = useState(null)
   const [status, setStatus] = useState('checking')
@@ -31,6 +33,7 @@ export default function useDashboardData(auth, options = {}) {
   const [cachedActuatorReadings, setCachedActuatorReadings] = useState(() => loadCachedActuatorReadings())
   const [activeCrop, setActiveCrop] = useState(() => getActiveCrop())
   const [crops, setCrops] = useState(() => loadCropSettings())
+  const [ghostWaterLedger, setGhostWaterLedger] = useState(() => loadGhostWaterLedger())
   const [nodeAssignments, setNodeAssignments] = useState(() => loadNodeAssignments())
 
   useEffect(() => {
@@ -54,6 +57,16 @@ export default function useDashboardData(auth, options = {}) {
     }
   }, [])
 
+  useEffect(() => {
+    const syncGhostWater = () => setGhostWaterLedger(loadGhostWaterLedger())
+    window.addEventListener('tlali-ghost-water-change', syncGhostWater)
+    window.addEventListener('storage', syncGhostWater)
+    return () => {
+      window.removeEventListener('tlali-ghost-water-change', syncGhostWater)
+      window.removeEventListener('storage', syncGhostWater)
+    }
+  }, [])
+
   async function loadDashboard() {
     try {
       setStatus('checking')
@@ -65,6 +78,10 @@ export default function useDashboardData(auth, options = {}) {
         authorizedFetch(`${API_URL}/api/v1/firebase/history?type=sensor&startDate=${range.startDate}&endDate=${today}`, auth.token, {}, auth.onUnauthorized),
         authorizedFetch(`${API_URL}/api/v1/firebase/history?type=actuator&startDate=${range.startDate}&endDate=${today}`, auth.token, {}, auth.onUnauthorized),
       ])
+      const cropConfiguration = await loadRemoteCropConfiguration(auth).catch(() => loadCropConfiguration())
+      setCrops(cropConfiguration.crops)
+      setNodeAssignments(cropConfiguration.nodeAssignments)
+      setActiveCrop(cropConfiguration.crops.find((crop) => crop.id === cropConfiguration.activeCropId) ?? cropConfiguration.crops[0])
       if (!summaryResponse.ok) throw new Error(`HTTP ${summaryResponse.status}`)
       setSummary(await summaryResponse.json())
       setFirebaseHistory(sensorHistoryResponse.ok ? await sensorHistoryResponse.json() : [])
@@ -106,7 +123,11 @@ export default function useDashboardData(auth, options = {}) {
 
   const firebaseNodes = Object.values(firebaseData?.nodes ?? {})
   const cultivationNodes = firebaseNodes.filter((node) => node.type === 'sensor' || node.node?.toLowerCase().includes('npk'))
-  const cultivationNode = cultivationNodes.find((node) => getAssignmentForNode(node.node, nodeAssignments)) ?? cultivationNodes[0]
+  const greenhouseOptions = buildGreenhouseOptions(nodeAssignments)
+  const greenhouseNode = selectedGreenhouse
+    ? cultivationNodes.find((node) => getAssignmentForNode(node.node, nodeAssignments)?.greenhouse === selectedGreenhouse)
+    : null
+  const cultivationNode = greenhouseNode ?? cultivationNodes.find((node) => getAssignmentForNode(node.node, nodeAssignments)) ?? cultivationNodes[0]
   const actuatorNode = firebaseNodes.find((node) => node.type === 'actuator')
   const cultivationAssignment = getAssignmentForNode(cultivationNode?.node, nodeAssignments)
   const cropForCurrentNode = getCropForNode(cultivationNode?.node, crops, nodeAssignments) ?? activeCrop
@@ -137,7 +158,11 @@ export default function useDashboardData(auth, options = {}) {
   const readings = todayReadings.length ? todayReadings : liveReadings
   const actuatorReadings = todayActuatorReadings.length ? todayActuatorReadings : liveActuatorReadings
   const latest = firebaseReading ?? summary?.latestReading
-  const alerts = buildSensorMetrics(latest, getCropParameters(cropForCurrentNode)).filter((metric) => metric.value !== null && metric.status !== 'healthy')
+  const cropParameters = getCropParameters(cropForCurrentNode)
+  const alerts = buildSensorMetrics(latest, cropParameters).filter((metric) => metric.value !== null && metric.status !== 'healthy')
+  const ghostPump = buildGhostPumpDecision(latest, cropParameters, cultivationNode, cultivationAssignment)
+  const todayKey = new Date().toLocaleDateString('en-CA')
+  const ghostWater = getGhostWaterForNode(ghostWaterLedger, ghostPump, actuatorNode)
   const firebaseLastReceivedAt = latestFirebaseTimestamp(firebaseNodes)
   const firebaseOnline = firebaseNodes.some((node) => isRecentTimestamp(node.gateway?.recibidoUtc))
   const activeFirebaseNodes = firebaseNodes.length
@@ -147,6 +172,11 @@ export default function useDashboardData(auth, options = {}) {
   function downloadReport() {
     downloadDailyExcel(todayReadings.length ? todayReadings : readings, latest, alerts)
   }
+
+  useEffect(() => {
+    const result = updateGhostWaterLedger(ghostWaterLedger, ghostPump, actuatorNode)
+    if (result.changed) setGhostWaterLedger(result.ledger)
+  }, [actuatorNode?.node, actuatorNode?.seq, ghostPump?.active, ghostPump?.node, ghostPump?.updatedAt, todayKey])
 
   return {
     activeFirebaseNodes,
@@ -161,6 +191,9 @@ export default function useDashboardData(auth, options = {}) {
     firebaseNodes,
     firebaseOnline,
     form,
+    ghostPump,
+    ghostWater,
+    greenhouseOptions,
     handleSubmit,
     lastReceivedAt,
     latest,
@@ -179,6 +212,61 @@ export default function useDashboardData(auth, options = {}) {
     todayActuatorReadings,
     updateField,
   }
+}
+
+function buildGhostPumpDecision(reading, cropParameters, cultivationNode, assignment) {
+  const moisture = toNumber(reading?.soilMoisturePercent)
+  const min = toNumber(cropParameters?.soilMoisturePercent?.min)
+  const max = toNumber(cropParameters?.soilMoisturePercent?.max)
+  const hasDecisionData = moisture !== null && min !== null && max !== null
+  const deficit = hasDecisionData ? Math.max(0, min - moisture) : null
+  const active = hasDecisionData && moisture < min
+  const tooWet = hasDecisionData && moisture > max
+
+  return {
+    active,
+    mode: 'ghost',
+    node: reading?.deviceId ?? cultivationNode?.node ?? null,
+    area: assignment?.area ?? reading?.siteId ?? 'Zona de cultivo',
+    greenhouse: assignment?.greenhouse ?? 'Invernadero 1',
+    moisture,
+    min,
+    max,
+    deficit,
+    relay1On: active,
+    relay2On: false,
+    state: !hasDecisionData ? 'empty' : active ? 'warning' : tooWet ? 'danger' : 'healthy',
+    statusLabel: !hasDecisionData
+      ? 'Sin datos para simular'
+      : active
+        ? 'Activa en sistema'
+        : tooWet
+          ? 'Bloqueada por exceso de humedad'
+          : 'En espera',
+    reason: !hasDecisionData
+      ? 'Falta lectura de humedad o rango mínimo/máximo.'
+      : active
+        ? `Humedad ${formatGhostNumber(moisture)}%, mínimo ${formatGhostNumber(min)}%. Déficit ${formatGhostNumber(deficit)}%.`
+        : tooWet
+          ? `Humedad ${formatGhostNumber(moisture)}%, por encima del máximo ${formatGhostNumber(max)}%.`
+          : `Humedad ${formatGhostNumber(moisture)}%, dentro del rango ${formatGhostNumber(min)}-${formatGhostNumber(max)}%.`,
+    recommendation: active
+      ? 'Simular encendido de bomba hasta recuperar el mínimo configurado.'
+      : tooWet
+        ? 'Mantener bomba apagada; no conviene regar.'
+        : 'Mantener bomba apagada; la planta no requiere riego.',
+    updatedAt: reading?.receivedAt ?? null,
+  }
+}
+
+function formatGhostNumber(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '-'
+  return Number(value).toLocaleString('es-MX', { maximumFractionDigits: 1 })
+}
+
+function buildGreenhouseOptions(assignments) {
+  return Array.from(new Set(assignments.map((assignment) => assignment.greenhouse).filter(Boolean)))
+    .map((greenhouse) => ({ label: greenhouse, value: greenhouse }))
 }
 
 export function getHistoryRange(periodKey) {

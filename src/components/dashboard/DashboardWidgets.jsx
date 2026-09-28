@@ -140,12 +140,12 @@ function DataRow({ label, muted = false, value }) {
   )
 }
 
-export function CultivationCard({ actuatorNode, cropParameters, firebaseNode, fullWidth = false, latest, onToggleView, readings, showMoistureTrend = true, view = 'suelo' }) {
+export function CultivationCard({ actuatorNode, cropParameters, firebaseNode, fullWidth = false, ghostPump, ghostWater, latest, onToggleView, readings, showMoistureTrend = true, view = 'suelo' }) {
   const live = firebaseNode?.data ?? {}
   return (
     <article className="paper-card p-4 sm:p-5" id="cultivo">
       <SectionHeading actions={onToggleView ? <ViewToggleButton onToggle={onToggleView} view={view} /> : null} eyebrow={LABELS.cropSensors} title={getViewTitle(view)} />
-      {view === 'actuadores' ? <ActuatorDetails node={actuatorNode} /> : null}
+      {view === 'actuadores' ? <ActuatorDetails ghostPump={ghostPump} ghostWater={ghostWater} node={actuatorNode} /> : null}
       {view === 'luz' ? <LightDetails latest={latest} live={live} readings={readings} /> : null}
       {view === 'suelo' ? (fullWidth ? <SoilDetailsWide cropParameters={cropParameters} latest={latest} live={live} /> : <SoilDetails latest={latest} live={live} readings={readings} />) : null}
     </article>
@@ -380,7 +380,7 @@ function LightDetails({ latest, live, readings }) {
   )
 }
 
-function ActuatorDetails({ fullWidth = false, node }) {
+function ActuatorDetails({ fullWidth = false, ghostPump, ghostWater, node }) {
   const data = node?.data ?? {}
   const signal = node?.radio ?? {}
   const tankOne = firstNumber(data, 'tank1DistanceCm', 'tankOneDistanceCm', 'cisterna1Cm')
@@ -394,6 +394,7 @@ function ActuatorDetails({ fullWidth = false, node }) {
       cards: [
         { helper: 'Sistema de riego', label: LABELS.relaysOne, state: node ? (data.relay1On ? 'warning' : 'healthy') : 'empty', value: node ? (data.relay1On ? 'Encendido' : 'Apagado') : '--' },
         { helper: 'Sistema de riego', label: LABELS.relaysTwo, state: node ? (data.relay2On ? 'warning' : 'healthy') : 'empty', value: node ? (data.relay2On ? 'Encendido' : 'Apagado') : '--' },
+        { helper: 'Simulación por humedad del cultivo', label: 'Bomba fantasma', state: ghostPump?.state ?? 'empty', value: ghostPump?.active ? 'Activa en sistema' : (ghostPump?.statusLabel ?? '--') },
       ],
       title: 'Riego',
     },
@@ -401,6 +402,7 @@ function ActuatorDetails({ fullWidth = false, node }) {
       cards: [
         { helper: 'Distancia al agua', label: LABELS.tankOne, range: { min: 0, max: 120 }, rangeUnit: ' cm', rawValue: tankOne, state: getActuatorRangeState(tankOne, 0, 120), value: formatMetric(tankOne, ' cm') },
         { helper: 'Distancia al agua', label: LABELS.tankTwo, range: { min: 0, max: 120 }, rangeUnit: ' cm', rawValue: tankTwo, state: getActuatorRangeState(tankTwo, 0, 120), value: formatMetric(tankTwo, ' cm') },
+        { helper: 'Con riego fantasma', label: 'Cisterna simulada', range: { min: 0, max: 120 }, rangeUnit: ' cm', rawValue: ghostWater?.simulatedTank1DistanceCm, state: getActuatorRangeState(ghostWater?.simulatedTank1DistanceCm, 0, 120), value: formatMetric(ghostWater?.simulatedTank1DistanceCm, ' cm') },
       ],
       title: 'Cisternas',
     },
@@ -441,6 +443,30 @@ function ActuatorDetails({ fullWidth = false, node }) {
           </section>
         ))}
       </div>
+      {ghostPump && (
+        <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${ghostPump.active ? 'border-[#ead5a8] bg-[#fff5dc] text-[#75501d]' : ghostPump.state === 'danger' ? 'border-[#e8c9bc] bg-[#fff7f2] text-[#8d3f2b]' : 'border-[#cce0cf] bg-[#edf7ee] text-[#245c32]'}`}>
+          <p className="font-bold">Programación fantasma de bomba</p>
+          <p className="mt-1">{ghostPump.reason}</p>
+          <p className="mt-1">{ghostPump.recommendation}</p>
+          <p className="mt-2 text-xs">
+            Nodo: {ghostPump.node ?? '-'} · {ghostPump.greenhouse} · {ghostPump.area}
+          </p>
+        </div>
+      )}
+      {ghostWater && (
+        <div className="mt-4 rounded-xl border border-[#d9d5c9] bg-[#fcf8f0] px-4 py-3 text-sm text-[#4c5b52]">
+          <p className="font-bold text-tlali-ink">Agua simulada por riego fantasma</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <DataRow label="Lectura real sensor" value={formatMetric(ghostWater.realTank1DistanceCm, ' cm')} />
+            <DataRow label="Con ajuste mensual" value={formatMetric(ghostWater.systemTank1DistanceCm, ' cm')} />
+            <DataRow label="Pendiente fantasma" value={formatMetric(ghostWater.pendingDropCm, ' cm')} />
+            <DataRow label="Próximo cierre" value={formatShortDate(ghostWater.nextMonthlyUpdateAt)} />
+          </div>
+          <p className="mt-2 text-xs text-tlali-muted">
+            La bomba fantasma descuenta agua una vez por día cuando la humedad está baja. Cada 30 días pasa el pendiente al ajuste real del sistema.
+          </p>
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-[#7c827c]">
         <span>{LABELS.node}: <strong className="text-[#344039]">{node?.node ?? '-'}</strong></span>
         <span>RSSI: <strong className="text-[#344039]">{formatMetric(signal.rssiDbm, ' dBm')}</strong></span>
@@ -550,11 +576,11 @@ export function GreenhouseMap({ actuatorNode, latest, selectedArea, setSelectedA
   )
 }
 
-export function ActuatorCard({ fullWidth = false, node }) {
+export function ActuatorCard({ fullWidth = false, ghostPump, ghostWater, node }) {
   return (
     <article className="paper-card p-4 sm:p-5">
       <SectionHeading eyebrow="Actuadores" title={LABELS.actuatorTitle} />
-      <ActuatorDetails fullWidth={fullWidth} node={node} />
+      <ActuatorDetails fullWidth={fullWidth} ghostPump={ghostPump} ghostWater={ghostWater} node={node} />
     </article>
   )
 }
@@ -905,6 +931,11 @@ function stateDotClass(status) {
 function compactNumber(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '-'
   return new Intl.NumberFormat('es-MX', { notation: Number(value) >= 1000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(Number(value))
+}
+
+function formatShortDate(value) {
+  if (!value) return '-'
+  return new Date(`${value}T00:00:00`).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 function firstNumber(source, ...keys) {

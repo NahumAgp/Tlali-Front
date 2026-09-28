@@ -6,13 +6,6 @@ import { getCropParameters } from '../lib/cropSettings.js'
 import { formatMetric, toNumber } from '../lib/sensors.js'
 import useDashboardData from '../hooks/useDashboardData.js'
 
-const QUICK_QUESTIONS = [
-  '¿Cómo estuvo mi cultivo hoy?',
-  '¿Qué variable estuvo más fuera de rango?',
-  '¿Cómo estuvo la humedad y temperatura?',
-  '¿Qué recomendaciones tengo para este día?',
-]
-
 const MONTHS = {
   abril: 3,
   agosto: 7,
@@ -32,7 +25,8 @@ export default function AIAgentPage({ auth, navigate, route }) {
   const data = useDashboardData(auth)
   const { activeCrop, downloadReport, readings, todayReadings } = data
   const [date, setDate] = useState(() => new Date().toLocaleDateString('en-CA'))
-  const [question, setQuestion] = useState('¿Cómo estuvo mi cultivo hoy?')
+  const [question, setQuestion] = useState('')
+  const [responseLanguage, setResponseLanguage] = useState('es')
   const [messages, setMessages] = useState(() => [
     {
       role: 'assistant',
@@ -40,6 +34,16 @@ export default function AIAgentPage({ auth, navigate, route }) {
     },
   ])
   const [status, setStatus] = useState('idle')
+  const [voiceStatus, setVoiceStatus] = useState('idle')
+  const [isRecording, setIsRecording] = useState(false)
+  const [voiceLevel, setVoiceLevel] = useState(0)
+  const [detectedVoiceLanguage, setDetectedVoiceLanguage] = useState(null)
+  const audioChunksRef = useRef([])
+  const analyserRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const animationFrameRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const mediaStreamRef = useRef(null)
   const messagesEndRef = useRef(null)
 
   const availableReadings = todayReadings.length ? todayReadings : readings
@@ -48,6 +52,11 @@ export default function AIAgentPage({ auth, navigate, route }) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, status])
+
+  useEffect(() => () => {
+    stopVoiceMeter()
+    stopMediaStream()
+  }, [])
 
   async function askAgent(event) {
     event.preventDefault()
@@ -59,7 +68,7 @@ export default function AIAgentPage({ auth, navigate, route }) {
     setQuestion('')
     setStatus('thinking')
     try {
-      const history = await fetchSensorHistory(auth, detectedDate)
+      const history = await fetchSensorHistory(auth, detectedDate).catch(() => [])
       const sourceReadings = history.length ? history : (isToday(detectedDate) ? availableReadings : [])
       const localAnswer = buildAgentAnswer(cleanQuestion, detectedDate, sourceReadings, activeCrop, activeParameters, history.length > 0)
       const openAiAnswer = await askOpenAiAgent(auth, {
@@ -70,26 +79,138 @@ export default function AIAgentPage({ auth, navigate, route }) {
         question: cleanQuestion,
         ranges: activeParameters,
         readings: sourceReadings,
+        responseLanguage,
       })
       setMessages((current) => [...current, { role: 'assistant', text: openAiAnswer }])
     } catch {
       setMessages((current) => [...current, {
         role: 'assistant',
-        text: 'No pude consultar Firebase en este momento. Revisa que el backend esté encendido y que Firebase responda correctamente.',
+        text: 'No pude preparar la respuesta en este momento. Revisa que el backend esté encendido e intenta otra vez.',
       }])
     } finally {
       setStatus('idle')
     }
   }
 
-  function useQuickQuestion(text) {
-    setQuestion(text)
-  }
-
   function handleQuestionKeyDown(event) {
     if (event.key !== 'Enter' || event.shiftKey) return
     event.preventDefault()
     event.currentTarget.form?.requestSubmit()
+  }
+
+  async function toggleRecording() {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop()
+      return
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setVoiceStatus('unsupported')
+      return
+    }
+
+    try {
+      setVoiceStatus('recording')
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+      startVoiceMeter(stream)
+      audioChunksRef.current = []
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : undefined
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      mediaRecorderRef.current = recorder
+      recorder.addEventListener('dataavailable', (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data)
+      })
+      recorder.addEventListener('stop', () => {
+        transcribeRecording(recorder.mimeType || 'audio/webm')
+      })
+      recorder.start()
+      setIsRecording(true)
+    } catch {
+      setIsRecording(false)
+      setVoiceStatus('error')
+      stopMediaStream()
+    }
+  }
+
+  async function transcribeRecording(mimeType) {
+    setIsRecording(false)
+    stopMediaStream()
+    setVoiceLevel(0)
+
+    const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+    audioChunksRef.current = []
+    if (!audioBlob.size) {
+      setVoiceStatus('empty')
+      return
+    }
+
+    setVoiceStatus('transcribing')
+    const formData = new FormData()
+    formData.append('audio', audioBlob, 'voice-message.webm')
+
+    try {
+      const response = await authorizedFetch(`${API_URL}/api/v1/ai/transcribe`, auth.token, {
+        method: 'POST',
+        body: formData,
+      }, auth.onUnauthorized)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      const transcript = data.text?.trim()
+      if (!transcript) {
+        setVoiceStatus('empty')
+        return
+      }
+      const detected = detectVoiceLanguage(data.language, transcript)
+      setDetectedVoiceLanguage(detected)
+      if (detected) setResponseLanguage(detected)
+      setQuestion((current) => current.trim() ? `${current.trim()}\n${transcript}` : transcript)
+      setVoiceStatus(detected === 'otomi' ? 'readyOtomi' : 'readySpanish')
+    } catch {
+      setVoiceStatus('error')
+    }
+  }
+
+  function startVoiceMeter(stream) {
+    stopVoiceMeter()
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext
+      const audioContext = new AudioContext()
+      const analyser = audioContext.createAnalyser()
+      const source = audioContext.createMediaStreamSource(stream)
+      analyser.fftSize = 256
+      source.connect(analyser)
+      audioContextRef.current = audioContext
+      analyserRef.current = analyser
+      const samples = new Uint8Array(analyser.frequencyBinCount)
+
+      function tick() {
+        analyser.getByteFrequencyData(samples)
+        const average = samples.reduce((sum, value) => sum + value, 0) / samples.length
+        setVoiceLevel(Math.min(1, average / 95))
+        animationFrameRef.current = window.requestAnimationFrame(tick)
+      }
+
+      tick()
+    } catch {
+      setVoiceLevel(0.35)
+    }
+  }
+
+  function stopVoiceMeter() {
+    if (animationFrameRef.current) {
+      window.cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
+    audioContextRef.current?.close().catch(() => {})
+    audioContextRef.current = null
+    analyserRef.current = null
+  }
+
+  function stopMediaStream() {
+    stopVoiceMeter()
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+    mediaStreamRef.current = null
   }
 
   return (
@@ -104,7 +225,7 @@ export default function AIAgentPage({ auth, navigate, route }) {
           </p>
         </section>
 
-        <section className="mt-4 grid gap-4 lg:grid-cols-[1fr_340px]">
+        <section className="mt-4">
           <article className="paper-card flex min-h-[680px] flex-col overflow-hidden bg-white/90">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e1dbcd] px-4 py-4 sm:px-5">
               <div>
@@ -137,69 +258,82 @@ export default function AIAgentPage({ auth, navigate, route }) {
               )}
               <div ref={messagesEndRef} />
             </div>
-            <form className="border-t border-[#e1dbcd] bg-[#fffaf1] p-4 sm:p-5" onSubmit={askAgent}>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                {QUICK_QUESTIONS.slice(0, 3).map((item) => (
-                  <button className="rounded-full border border-[#d8cfbf] bg-white px-3 py-2 text-xs font-bold text-[#516158] transition hover:bg-[#f4ead6]" key={item} onClick={() => useQuickQuestion(item)} type="button">{item}</button>
-                ))}
+            <form className="chat-composer" onSubmit={askAgent}>
+              <div className="composer-topline">
+                <div className="language-switch" aria-label="Idioma de respuesta">
+                  <button className={responseLanguage === 'es' ? 'active' : ''} onClick={() => setResponseLanguage('es')} type="button">Español</button>
+                  <button className={responseLanguage === 'otomi' ? 'active' : ''} onClick={() => setResponseLanguage('otomi')} type="button">Otomí</button>
+                </div>
+                <p className="composer-status">{voiceStatusMessage(voiceStatus, detectedVoiceLanguage)}</p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-[165px_1fr]">
-                <label className="grid content-start gap-1 text-xs font-bold text-[#516158]">
-                  Fecha
-                  <input className="rounded-xl border border-[#d8cfbf] bg-white px-3 py-2 text-sm text-tlali-ink" onChange={(event) => setDate(event.target.value)} type="date" value={date} />
-                </label>
-                <label className="grid gap-1 text-xs font-bold text-[#516158]">
-                  Mensaje
-                  <textarea
-                    className="min-h-[86px] resize-none rounded-2xl border border-[#d8cfbf] bg-white px-4 py-3 text-sm leading-6 text-tlali-ink outline-none transition focus:border-tlali-jade-dark focus:ring-2 focus:ring-[#cce8df]"
-                    onChange={(event) => setQuestion(event.target.value)}
-                    onKeyDown={handleQuestionKeyDown}
-                    placeholder="Escribe una pregunta, por ejemplo: ¿cómo estuvo mi cultivo el 24 de agosto?"
-                    value={question}
-                  />
-                </label>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs font-semibold text-tlali-muted">Enter envía · Shift+Enter agrega línea</p>
-                <button className="primary-button w-full sm:w-auto" disabled={status === 'thinking' || !question.trim()} type="submit">
-                  {status === 'thinking' ? 'Enviando...' : 'Enviar mensaje'}
+
+              {isRecording && <VoiceMeter level={voiceLevel} />}
+
+              <div className={`composer-row ${isRecording ? 'recording' : ''}`}>
+                <textarea
+                  aria-label="Mensaje"
+                  className="composer-input"
+                  disabled={isRecording || voiceStatus === 'transcribing'}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={handleQuestionKeyDown}
+                  placeholder={isRecording ? 'Escuchando...' : 'Pregunta lo que quieras sobre el cultivo.'}
+                  rows={1}
+                  value={question}
+                />
+                <button
+                  aria-label={isRecording ? 'Detener grabación' : 'Grabar mensaje de voz'}
+                  className={`composer-mic ${isRecording ? 'active' : ''}`}
+                  disabled={status === 'thinking' || voiceStatus === 'transcribing'}
+                  onClick={toggleRecording}
+                  type="button"
+                >
+                  <MicIcon active={isRecording} />
+                </button>
+                <button className="composer-send" disabled={status === 'thinking' || !question.trim() || isRecording} type="submit" aria-label="Enviar mensaje">
+                  {status === 'thinking' ? <span className="send-spinner" /> : <SendIcon />}
                 </button>
               </div>
             </form>
           </article>
-
-          <aside className="grid content-start gap-4">
-            <article className="paper-card p-4 sm:p-5">
-              <p className="eyebrow">Prueba rápida</p>
-              <h2 className="mt-1 text-lg font-bold">Preguntas sugeridas</h2>
-              <div className="mt-4 grid gap-2">
-                {QUICK_QUESTIONS.map((item) => (
-                  <button className="secondary-button justify-start text-left" key={item} onClick={() => useQuickQuestion(item)} type="button">{item}</button>
-                ))}
-              </div>
-            </article>
-            <article className="paper-card p-4 sm:p-5">
-              <p className="eyebrow">Datos usados</p>
-              <div className="mt-3 grid gap-2 text-sm">
-                <InfoRow label="Fuente" value="Firebase historial" />
-                <InfoRow label="Cultivo" value={activeCrop?.name ?? 'Sin configurar'} />
-                <InfoRow label="Fecha" value={formatDate(date)} />
-                <InfoRow label="Hoy en memoria" value={`${availableReadings.length} registros`} />
-              </div>
-            </article>
-          </aside>
         </section>
       </div>
     </div>
   )
 }
 
-function InfoRow({ label, value }) {
+function VoiceMeter({ level }) {
+  const normalized = Math.max(0.08, Math.min(1, level))
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-[#e1dbcd] bg-[#fcf8f0] px-3 py-2">
-      <span className="text-xs font-bold text-tlali-muted">{label}</span>
-      <strong className="text-right text-xs">{value}</strong>
+    <div className="voice-meter" aria-label="Nivel de voz detectado">
+      <span className="voice-dot" />
+      <div className="voice-wave">
+        {Array.from({ length: 18 }, (_, index) => {
+          const phase = Math.sin((index + 1) * 0.85) * 0.5 + 0.5
+          const height = 18 + Math.round(normalized * (18 + phase * 34))
+          return <i key={index} style={{ height: `${height}px` }} />
+        })}
+      </div>
+      <strong>{level > 0.18 ? 'Voz detectada' : 'Escuchando'}</strong>
     </div>
+  )
+}
+
+function MicIcon({ active }) {
+  return (
+    <svg aria-hidden="true" className="composer-icon" fill="none" viewBox="0 0 24 24">
+      <path d="M12 14.5a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5a3.5 3.5 0 0 0 3.5 3.5Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      <path d="M5 10.5a7 7 0 0 0 14 0M12 17.5V21M9 21h6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      {active && <circle cx="18" cy="5" fill="currentColor" r="2" />}
+    </svg>
+  )
+}
+
+function SendIcon() {
+  return (
+    <svg aria-hidden="true" className="composer-icon" fill="none" viewBox="0 0 24 24">
+      <path d="m4 12 16-7-7 16-2-7-7-2Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+      <path d="m11 13 4-4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
   )
 }
 
@@ -228,6 +362,7 @@ async function askOpenAiAgent(auth, context) {
       metrics,
       question: context.question,
       readingsCount: context.readings.length,
+      responseLanguage: context.responseLanguage,
       stageName: context.crop?.stages?.find((stage) => stage.id === context.crop?.activeStageId)?.name ?? null,
     }),
   }, auth.onUnauthorized)
@@ -236,10 +371,14 @@ async function askOpenAiAgent(auth, context) {
     return `${context.fallbackAnswer}\n\nNota: ${error?.message ?? 'OpenAI no está disponible en este momento.'}`
   }
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`)
+    return `${context.fallbackAnswer}\n\nNota: OpenAI no respondió correctamente, así que usé el análisis local del cultivo.`
   }
-  const data = await response.json()
-  return data.answer ?? context.fallbackAnswer
+  try {
+    const data = await response.json()
+    return data.answer ?? context.fallbackAnswer
+  } catch {
+    return `${context.fallbackAnswer}\n\nNota: OpenAI respondió en un formato inesperado, así que usé el análisis local del cultivo.`
+  }
 }
 
 function firebaseHistoryToReading(entry) {
@@ -265,7 +404,7 @@ function firebaseHistoryToReading(entry) {
 
 function buildAgentAnswer(question, date, readings, crop, ranges, isFirebaseHistory) {
   if (!readings.length) {
-    return `No encontré registros para ${formatDate(date)} en Firebase.\n\nSi esa fecha es anterior a que activáramos el historial en Firebase, no habrá datos para analizar. Desde ahora se irán acumulando mientras el backend esté encendido.`
+    return `Sin datos para ${formatDate(date)}.\nAcción: confirma que el backend esté encendido y que Firebase tenga historial de esa fecha.`
   }
 
   const summary = [
@@ -285,14 +424,15 @@ function buildAgentAnswer(question, date, readings, crop, ranges, isFirebaseHist
   const questionLower = question.toLowerCase()
 
   if (questionLower.includes('humedad') || questionLower.includes('temperatura')) {
-    return `Para ${formatDate(date)}, revisé ${readings.length} registros desde ${formatTime(first)} hasta ${formatTime(last)} usando ${sourceText}.\n\n${summary.filter((item) => item.label.includes('Humedad') || item.label.includes('Temperatura')).map(formatMetricLine).join('\n')}\n\nRecomendación: revisa primero las variables con mayor tiempo fuera de rango; si es de noche, interpreta humedad ambiental alta con más tolerancia.`
+    const lines = summary.filter((item) => item.label.includes('Humedad') || item.label.includes('Temperatura')).slice(0, 4)
+    return `Lecturas: ${readings.length} (${formatTime(first)}-${formatTime(last)}, ${sourceText}).\n${lines.map(formatMetricLine).join('\n')}\nAcción: prioriza la variable con más % fuera de rango.`
   }
 
   if (questionLower.includes('fuera') || questionLower.includes('rango') || questionLower.includes('variable')) {
-    return `La variable más crítica para ${formatDate(date)} fue ${worst.label}: ${worst.outPercent}% de sus lecturas estuvo fuera del rango configurado.\n\n${formatMetricLine(worst)}\n\nDespués revisaría: ${summary.slice(1, 4).map((item) => item.label).join(', ')}.`
+    return `Crítica: ${worst.label} (${worst.outPercent}% fuera de rango).\n${formatMetricLine(worst)}\nAcción: revisar calibración/sensor y condición física del cultivo antes de ajustar manejo.`
   }
 
-  return `Resumen de ${crop?.name ?? 'cultivo'} para ${formatDate(date)}.\n\nAnalicé ${readings.length} registros desde ${formatTime(first)} hasta ${formatTime(last)} usando ${sourceText}.\n\n${summary.slice(0, 6).map(formatMetricLine).join('\n')}\n\nConclusión: ${worst.outPercent > 40 ? `hay que priorizar ${worst.label}, porque fue la variable con más lecturas fuera de rango.` : 'el día se ve relativamente estable en las variables principales disponibles.'}`
+  return `${crop?.name ?? 'Cultivo'} ${formatDate(date)}: ${readings.length} registros (${formatTime(first)}-${formatTime(last)}, ${sourceText}).\n${summary.slice(0, 5).map(formatMetricLine).join('\n')}\nAcción prioritaria: ${worst.outPercent > 40 ? `revisar ${worst.label}.` : 'mantener monitoreo; variables principales estables.'}`
 }
 
 function metricSummary(label, readings, key, suffix, range) {
@@ -336,8 +476,8 @@ function buildMetricSummaries(readings, ranges) {
 }
 
 function formatMetricLine(item) {
-  const range = item.range ? ` rango ${formatMetric(item.range.min, item.suffix)} a ${formatMetric(item.range.max, item.suffix)}` : ' sin rango configurado'
-  return `${item.label}: promedio ${formatMetric(item.average, item.suffix)}, mínimo ${formatMetric(item.min, item.suffix)}, máximo ${formatMetric(item.max, item.suffix)}, ${item.outPercent}% fuera de rango (${range}).`
+  const range = item.range ? `${formatMetric(item.range.min, item.suffix)}-${formatMetric(item.range.max, item.suffix)}` : 'sin rango'
+  return `${item.label}: prom. ${formatMetric(item.average, item.suffix)}, ${item.outPercent}% fuera (${range}).`
 }
 
 function detectDate(text) {
@@ -382,6 +522,48 @@ function formatDate(date) {
 function formatTime(date) {
   if (!date) return '-'
   return new Date(date).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+}
+
+function voiceStatusMessage(status, detectedLanguage) {
+  if (status === 'recording') return 'Grabando voz...'
+  if (status === 'transcribing') return 'Convirtiendo voz a texto...'
+  if (status === 'readyOtomi') return 'Voz convertida. Idioma detectado: otomí.'
+  if (status === 'readySpanish') return `Voz convertida.${detectedLanguage === 'es' ? ' Idioma detectado: español.' : ''}`
+  if (status === 'empty') return 'No detecté voz en la grabación.'
+  if (status === 'unsupported') return 'Este navegador no permite grabar voz aquí.'
+  if (status === 'error') return 'No pude procesar el audio.'
+  return 'Enter envía · Shift+Enter agrega línea'
+}
+
+function detectVoiceLanguage(language, transcript) {
+  const normalizedLanguage = normalizeText(language ?? '')
+  const normalizedTranscript = normalizeText(transcript ?? '')
+  if (
+    normalizedLanguage.includes('otomi')
+    || normalizedLanguage.includes('hnahnu')
+    || normalizedLanguage.includes('hñahñu')
+    || normalizedLanguage.includes('oto')
+    || /\b(hnahnu|hñahñu|nugi|mfa?di|xudi|juadi|ntudi|otomi)\b/.test(normalizedTranscript)
+    || /[äëïöüʼ]/i.test(transcript)
+  ) {
+    return 'otomi'
+  }
+  if (
+    normalizedLanguage.includes('spanish')
+    || normalizedLanguage.includes('espanol')
+    || normalizedLanguage === 'es'
+    || /\b(el|la|los|las|cultivo|jitomate|humedad|temperatura|riego|planta)\b/.test(normalizedTranscript)
+  ) {
+    return 'es'
+  }
+  return null
+}
+
+function normalizeText(value) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
 }
 
 function dataValue(source, ...keys) {
