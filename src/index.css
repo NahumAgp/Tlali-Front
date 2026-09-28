@@ -336,6 +336,68 @@ section[id] {
   white-space: nowrap;
 }
 
+.message-content {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.message-content p {
+  margin: 0;
+}
+
+.message-content strong {
+  font-weight: 950;
+}
+
+.message-content a {
+  color: var(--tlali-jade-dark);
+  font-weight: 900;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.message-content.user a {
+  color: #e8fff7;
+}
+
+.message-heading {
+  color: var(--tlali-jade-dark);
+  font-size: 0.9rem;
+  font-weight: 950;
+  line-height: 1.25;
+  margin: 0.35rem 0 0;
+}
+
+.message-heading:first-child {
+  margin-top: 0;
+}
+
+.message-list {
+  display: grid;
+  gap: 0.42rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.message-list li {
+  background: rgb(255 255 255 / 0.58);
+  border: 1px solid rgb(225 219 205 / 0.75);
+  border-radius: 0.75rem;
+  line-height: 1.55;
+  padding: 0.55rem 0.7rem;
+}
+
+.message-content.user .message-list li {
+  background: rgb(255 255 255 / 0.12);
+  border-color: rgb(255 255 255 / 0.18);
+}
+
+.message-space {
+  display: none;
+}
+
 @keyframes pulse {
   0%,
   100% {

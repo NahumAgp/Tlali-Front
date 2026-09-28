@@ -241,10 +241,8 @@ export default function AIAgentPage({ auth, navigate, route }) {
                     <p className={`mb-1 text-[10px] font-black uppercase tracking-[0.06em] ${message.role === 'user' ? 'text-[#cfe7df]' : 'text-[#9b231e]'}`}>
                       {message.role === 'user' ? 'Tú' : 'Tlali IA'}
                     </p>
-                    <div className="space-y-2">
-                      {message.text.split('\n').filter((line, lineIndex, lines) => line.trim() || lineIndex === lines.length - 1).map((line, lineIndex) => (
-                        <p key={`${line}-${lineIndex}`}>{line || ' '}</p>
-                      ))}
+                    <div className={`message-content ${message.role === 'user' ? 'user' : 'assistant'}`}>
+                      {renderMessageContent(message.text)}
                     </div>
                   </div>
                 </div>
@@ -337,6 +335,75 @@ function SendIcon() {
   )
 }
 
+function renderMessageContent(text) {
+  const blocks = []
+  let listItems = []
+
+  function flushList() {
+    if (!listItems.length) return
+    const items = listItems
+    listItems = []
+    blocks.push(
+      <ul className="message-list" key={`list-${blocks.length}`}>
+        {items.map((item, index) => <li key={`${item}-${index}`}>{renderInlineContent(item)}</li>)}
+      </ul>,
+    )
+  }
+
+  text.split('\n').forEach((line, index) => {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flushList()
+      blocks.push(<span className="message-space" key={`space-${index}`} />)
+      return
+    }
+    if (trimmed.startsWith('### ')) {
+      flushList()
+      blocks.push(<h3 className="message-heading" key={`heading-${index}`}>{renderInlineContent(trimmed.slice(4))}</h3>)
+      return
+    }
+    if (trimmed.startsWith('- ')) {
+      listItems.push(trimmed.slice(2))
+      return
+    }
+    flushList()
+    blocks.push(<p key={`paragraph-${index}`}>{renderInlineContent(trimmed)}</p>)
+  })
+  flushList()
+
+  return blocks
+}
+
+function renderInlineContent(text) {
+  const parts = []
+  const pattern = /(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)]+\))/g
+  let cursor = 0
+  let match
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > cursor) {
+      parts.push(text.slice(cursor, match.index))
+    }
+    const token = match[0]
+    if (token.startsWith('**')) {
+      parts.push(<strong key={`strong-${match.index}`}>{token.slice(2, -2)}</strong>)
+    } else {
+      const linkMatch = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/)
+      if (linkMatch) {
+        parts.push(
+          <a href={linkMatch[2]} key={`link-${match.index}`} rel="noreferrer" target="_blank">
+            {linkMatch[1]}
+          </a>,
+        )
+      }
+    }
+    cursor = match.index + token.length
+  }
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor))
+  }
+  return parts.map((part, index) => typeof part === 'string' ? <span key={`text-${index}`}>{part}</span> : part)
+}
+
 async function fetchSensorHistory(auth, date) {
   const response = await authorizedFetch(`${API_URL}/api/v1/firebase/history?type=sensor&date=${date}`, auth.token, {}, auth.onUnauthorized)
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -425,14 +492,14 @@ function buildAgentAnswer(question, date, readings, crop, ranges, isFirebaseHist
 
   if (questionLower.includes('humedad') || questionLower.includes('temperatura')) {
     const lines = summary.filter((item) => item.label.includes('Humedad') || item.label.includes('Temperatura')).slice(0, 4)
-    return `Lecturas: ${readings.length} (${formatTime(first)}-${formatTime(last)}, ${sourceText}).\n${lines.map(formatMetricLine).join('\n')}\nAcción: prioriza la variable con más % fuera de rango.`
+    return `### Diagnóstico rápido\n- 📊 **Lecturas:** ${readings.length} (${formatTime(first)}-${formatTime(last)}, ${sourceText}).\n${lines.map((item) => `- ${severityIcon(item.outPercent)} **${item.label}:** ${formatMetricLine(item)}`).join('\n')}\n### Acción prioritaria\n- ✅ **Prioriza** la variable con mayor % fuera de rango y confirma sensor antes de ajustar manejo.\n### Para aprender más\n- ▶️ [Temperatura y humedad en invernadero](https://www.youtube.com/results?search_query=temperatura+humedad+invernadero+jitomate)\n- ▶️ [Manejo ambiental en jitomate](https://www.youtube.com/results?search_query=manejo+ambiental+jitomate+invernadero)`
   }
 
   if (questionLower.includes('fuera') || questionLower.includes('rango') || questionLower.includes('variable')) {
-    return `Crítica: ${worst.label} (${worst.outPercent}% fuera de rango).\n${formatMetricLine(worst)}\nAcción: revisar calibración/sensor y condición física del cultivo antes de ajustar manejo.`
+    return `### Diagnóstico rápido\n- 🔴 **Variable crítica:** ${worst.label} (${worst.outPercent}% fuera de rango).\n- ${severityIcon(worst.outPercent)} **Detalle:** ${formatMetricLine(worst)}\n### Acción prioritaria\n- ✅ **Verifica/calibra** el sensor y revisa condición física del cultivo antes de ajustar fertilización, riego o clima.\n### Para aprender más\n- ▶️ [Calibración de sensores agrícolas](https://www.youtube.com/results?search_query=calibracion+sensores+agricolas+ph+ec)\n- ▶️ [Interpretar pH y conductividad en cultivo](https://www.youtube.com/results?search_query=ph+conductividad+electrica+solucion+nutritiva+jitomate)`
   }
 
-  return `${crop?.name ?? 'Cultivo'} ${formatDate(date)}: ${readings.length} registros (${formatTime(first)}-${formatTime(last)}, ${sourceText}).\n${summary.slice(0, 5).map(formatMetricLine).join('\n')}\nAcción prioritaria: ${worst.outPercent > 40 ? `revisar ${worst.label}.` : 'mantener monitoreo; variables principales estables.'}`
+  return `### Diagnóstico rápido\n- 🌱 **${crop?.name ?? 'Cultivo'}:** ${formatDate(date)}, ${readings.length} registros (${formatTime(first)}-${formatTime(last)}, ${sourceText}).\n${summary.slice(0, 5).map((item) => `- ${severityIcon(item.outPercent)} **${item.label}:** ${formatMetricLine(item)}`).join('\n')}\n### Acción prioritaria\n- ✅ **${worst.outPercent > 40 ? `Revisar ${worst.label}` : 'Mantener monitoreo'}** ${worst.outPercent > 40 ? 'y confirmar sensor antes de aplicar correcciones.' : 'porque las variables principales se ven estables.'}\n### Para aprender más\n- ▶️ [Manejo de jitomate en invernadero](https://www.youtube.com/results?search_query=manejo+jitomate+invernadero)\n- ▶️ [pH y CE en solución nutritiva](https://www.youtube.com/results?search_query=ph+ce+solucion+nutritiva+jitomate)`
 }
 
 function metricSummary(label, readings, key, suffix, range) {
@@ -478,6 +545,12 @@ function buildMetricSummaries(readings, ranges) {
 function formatMetricLine(item) {
   const range = item.range ? `${formatMetric(item.range.min, item.suffix)}-${formatMetric(item.range.max, item.suffix)}` : 'sin rango'
   return `${item.label}: prom. ${formatMetric(item.average, item.suffix)}, ${item.outPercent}% fuera (${range}).`
+}
+
+function severityIcon(outPercent) {
+  if (outPercent >= 60) return '🔴'
+  if (outPercent >= 25) return '🟡'
+  return '🟢'
 }
 
 function detectDate(text) {
