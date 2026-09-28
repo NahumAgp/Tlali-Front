@@ -21,7 +21,8 @@ npx --yes pnpm@10 install
 node_modules\.bin\vite.CMD --host 127.0.0.1
 ```
 
-Por defecto consume `http://localhost:8080`. Puedes cambiarlo con `VITE_API_URL`.
+Por defecto consume la API desde el mismo dominio de la aplicación. En
+desarrollo puedes cambiarla con `VITE_API_URL=http://localhost:8080`.
 
 ## Login
 
