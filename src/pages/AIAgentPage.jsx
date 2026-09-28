@@ -63,17 +63,19 @@ export default function AIAgentPage({ auth, navigate, route }) {
     const cleanQuestion = question.trim()
     if (!cleanQuestion) return
     const detectedDate = detectDate(cleanQuestion) ?? date
-    setDate(detectedDate)
+    const historyRange = detectHistoryRange(cleanQuestion, detectedDate)
+    const periodLabel = formatHistoryPeriod(historyRange)
+    setDate(historyRange.endDate)
     setMessages((current) => [...current, { role: 'user', text: cleanQuestion }])
     setQuestion('')
     setStatus('thinking')
     try {
-      const history = await fetchSensorHistory(auth, detectedDate).catch(() => [])
-      const sourceReadings = history.length ? history : (isToday(detectedDate) ? availableReadings : [])
-      const localAnswer = buildAgentAnswer(cleanQuestion, detectedDate, sourceReadings, activeCrop, activeParameters, history.length > 0)
+      const history = await fetchSensorHistory(auth, historyRange).catch(() => [])
+      const sourceReadings = history.length ? history : (isToday(historyRange.endDate) ? availableReadings : [])
+      const localAnswer = buildAgentAnswer(cleanQuestion, periodLabel, sourceReadings, activeCrop, activeParameters, history.length > 0)
       const openAiAnswer = await askOpenAiAgent(auth, {
         crop: activeCrop,
-        date: detectedDate,
+        date: periodLabel,
         fallbackAnswer: localAnswer,
         firebaseHistory: history.length > 0,
         question: cleanQuestion,
@@ -221,7 +223,7 @@ export default function AIAgentPage({ auth, navigate, route }) {
           <p className="eyebrow">Agente IA</p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">Preguntas sobre el cultivo</h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-tlali-muted">
-            Consulta el historial de Firebase por fecha y recibe un resumen comparado contra los rangos configurados del cultivo.
+            Consulta el historial guardado en MySQL y recibe un resumen comparado contra los rangos configurados del cultivo.
           </p>
         </section>
 
@@ -404,8 +406,12 @@ function renderInlineContent(text) {
   return parts.map((part, index) => typeof part === 'string' ? <span key={`text-${index}`}>{part}</span> : part)
 }
 
-async function fetchSensorHistory(auth, date) {
-  const response = await authorizedFetch(`${API_URL}/api/v1/firebase/history?type=sensor&date=${date}`, auth.token, {}, auth.onUnauthorized)
+async function fetchSensorHistory(auth, range) {
+  const isRange = range.startDate !== range.endDate
+  const query = isRange
+    ? `startDate=${range.startDate}&endDate=${range.endDate}&limit=100000`
+    : `date=${range.startDate}`
+  const response = await authorizedFetch(`${API_URL}/api/v1/firebase/history?type=sensor&${query}`, auth.token, {}, auth.onUnauthorized)
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   const entries = await response.json()
   return entries.map(firebaseHistoryToReading).filter(Boolean)
@@ -469,9 +475,9 @@ function firebaseHistoryToReading(entry) {
   }
 }
 
-function buildAgentAnswer(question, date, readings, crop, ranges, isFirebaseHistory) {
+function buildAgentAnswer(question, periodLabel, readings, crop, ranges, isDatabaseHistory) {
   if (!readings.length) {
-    return `Sin datos para ${formatDate(date)}.\nAcción: confirma que el backend esté encendido y que Firebase tenga historial de esa fecha.`
+    return `Sin datos para ${periodLabel}.\nAcción: confirma que el backend esté encendido y que MySQL tenga registros de ese periodo.`
   }
 
   const summary = [
@@ -487,7 +493,7 @@ function buildAgentAnswer(question, date, readings, crop, ranges, isFirebaseHist
   const worst = [...summary].sort((left, right) => right.outPercent - left.outPercent)[0]
   const first = readings[0]?.receivedAt
   const last = readings[readings.length - 1]?.receivedAt
-  const sourceText = isFirebaseHistory ? 'Firebase histórico' : 'lecturas disponibles de hoy'
+  const sourceText = isDatabaseHistory ? 'historial MySQL' : 'lecturas disponibles en tiempo real'
   const questionLower = question.toLowerCase()
 
   if (questionLower.includes('humedad') || questionLower.includes('temperatura')) {
@@ -499,7 +505,7 @@ function buildAgentAnswer(question, date, readings, crop, ranges, isFirebaseHist
     return `### Diagnóstico rápido\n- 🔴 **Variable crítica:** ${worst.label} (${worst.outPercent}% fuera de rango).\n- ${severityIcon(worst.outPercent)} **Detalle:** ${formatMetricLine(worst)}\n### Acción prioritaria\n- ✅ **Verifica/calibra** el sensor y revisa condición física del cultivo antes de ajustar fertilización, riego o clima.\n### Para aprender más\n- ▶️ [Calibración de sensores agrícolas](https://www.youtube.com/results?search_query=calibracion+sensores+agricolas+ph+ec)\n- ▶️ [Interpretar pH y conductividad en cultivo](https://www.youtube.com/results?search_query=ph+conductividad+electrica+solucion+nutritiva+jitomate)`
   }
 
-  return `### Diagnóstico rápido\n- 🌱 **${crop?.name ?? 'Cultivo'}:** ${formatDate(date)}, ${readings.length} registros (${formatTime(first)}-${formatTime(last)}, ${sourceText}).\n${summary.slice(0, 5).map((item) => `- ${severityIcon(item.outPercent)} **${item.label}:** ${formatMetricLine(item)}`).join('\n')}\n### Acción prioritaria\n- ✅ **${worst.outPercent > 40 ? `Revisar ${worst.label}` : 'Mantener monitoreo'}** ${worst.outPercent > 40 ? 'y confirmar sensor antes de aplicar correcciones.' : 'porque las variables principales se ven estables.'}\n### Para aprender más\n- ▶️ [Manejo de jitomate en invernadero](https://www.youtube.com/results?search_query=manejo+jitomate+invernadero)\n- ▶️ [pH y CE en solución nutritiva](https://www.youtube.com/results?search_query=ph+ce+solucion+nutritiva+jitomate)`
+  return `### Diagnóstico rápido\n- 🌱 **${crop?.name ?? 'Cultivo'}:** ${periodLabel}, ${readings.length} registros (${formatTime(first)}-${formatTime(last)}, ${sourceText}).\n${summary.slice(0, 5).map((item) => `- ${severityIcon(item.outPercent)} **${item.label}:** ${formatMetricLine(item)}`).join('\n')}\n### Acción prioritaria\n- ✅ **${worst.outPercent > 40 ? `Revisar ${worst.label}` : 'Mantener monitoreo'}** ${worst.outPercent > 40 ? 'y confirmar sensor antes de aplicar correcciones.' : 'porque las variables principales se ven estables.'}\n### Para aprender más\n- ▶️ [Manejo de jitomate en invernadero](https://www.youtube.com/results?search_query=manejo+jitomate+invernadero)\n- ▶️ [pH y CE en solución nutritiva](https://www.youtube.com/results?search_query=ph+ce+solucion+nutritiva+jitomate)`
 }
 
 function metricSummary(label, readings, key, suffix, range) {
@@ -551,6 +557,29 @@ function severityIcon(outPercent) {
   if (outPercent >= 60) return '🔴'
   if (outPercent >= 25) return '🟡'
   return '🟢'
+}
+
+function detectHistoryRange(text, fallbackDate) {
+  const normalized = normalizeText(text)
+  let days = 1
+  if (/todo el historial|todo el tiempo|desde el inicio|historico completo/.test(normalized)) days = 90
+  else if (/ultimos?\s+(dos|2)\s+meses|2\s+meses/.test(normalized)) days = 60
+  else if (/ultimos?\s+(tres|3)\s+meses|3\s+meses/.test(normalized)) days = 90
+  else if (/ultimo\s+mes|ultimos?\s+30\s+dias/.test(normalized)) days = 30
+  else if (/ultima\s+semana|ultimos?\s+7\s+dias/.test(normalized)) days = 7
+  if (days === 1) return { startDate: fallbackDate, endDate: fallbackDate }
+  const end = new Date()
+  const start = new Date(end)
+  start.setDate(start.getDate() - (days - 1))
+  return {
+    startDate: start.toLocaleDateString('en-CA'),
+    endDate: end.toLocaleDateString('en-CA'),
+  }
+}
+
+function formatHistoryPeriod(range) {
+  if (range.startDate === range.endDate) return formatDate(range.startDate)
+  return `${formatDate(range.startDate)} a ${formatDate(range.endDate)}`
 }
 
 function detectDate(text) {
